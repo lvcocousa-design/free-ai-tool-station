@@ -30,7 +30,19 @@ async function api(path, options) {
   try {
     data = await res.json();
   } catch (e) {
+    // 401 且非 JSON（如代理层拦截）：同样跳回登录遮罩
+    if (res.status === 401) {
+      showLoginOverlay();
+      throw new Error('登录已过期，请重新登录');
+    }
     throw new Error('服务器返回异常（HTTP ' + res.status + '）');
+  }
+  // 未登录 / 会话失效：跳回登录遮罩（登录接口本身失败时遮罩已在显示，无影响）
+  if (res.status === 401) {
+    showLoginOverlay();
+    const err = new Error((data && data.message) || '登录已过期，请重新登录');
+    err.unauthorized = true;
+    throw err;
   }
   if (data && data.ok === false) {
     const err = new Error(data.message || '请求失败');
@@ -79,11 +91,10 @@ const state = {
   selectedFrameId: null,
 };
 
-const PROVIDER_LABELS = {
-  zhipu: '智谱 z.ai', groq: 'Groq', cloudflare: 'Cloudflare',
-  deepl: 'DeepL', elevenlabs: 'ElevenLabs', siliconflow: '硅基流动',
-  kaggle: 'Kaggle', instabox: 'InstaBox',
-};
+/* 供应商显示名来自 GET /api/providers（state.providers），未加载时回落为内部名 */
+function providerLabel(name) {
+  return (state.providers[name] && state.providers[name].label) || name;
+}
 
 const BACKEND_NOTES = {
   instabox: '免费 CPU 出图，约 4 分钟一张，适合日常出图。',
@@ -95,7 +106,7 @@ const BACKEND_LABELS = { instabox: 'InstaBox CPU', kaggle: 'Kaggle GPU', cloudfl
 
 /* 未配置提示：显示在对应功能区，带跳转设置页的链接 */
 function notConfiguredHTML(providerName) {
-  const label = PROVIDER_LABELS[providerName] || providerName;
+  const label = providerLabel(providerName);
   return esc(label) + ' 未配置，请先去<a href="#" data-goto-settings>设置页</a>填写 Key。';
 }
 function setNotConfigured(el, providerName) {
@@ -108,19 +119,40 @@ function setNotConfigured(el, providerName) {
   }
 }
 
-/* ---------- 页签切换 ---------- */
+/* ---------- 页签切换 ----------
+   功能页签注册表：加新功能时，在此注册一项 + 在 index.html 加一个
+   id 为 panel-<id> 的 section；按钮由下方代码动态生成，无需改 HTML。
+   onShow 为可选的切到该页签时执行的刷新函数。 */
+const FEATURES = [
+  { id: 'create', label: '创作', onShow: loadHistory },
+  { id: 'chat', label: '对话/代码', onShow: loadChats },
+  { id: 'analyze', label: '识图' },
+  { id: 'translate', label: '翻译' },
+  { id: 'voice', label: '语音' },
+  { id: 'music', label: '音乐' },
+  { id: 'embed', label: '向量' },
+  { id: 'settings', label: '设置', onShow: loadUsage },
+];
 
 function showTab(name) {
+  const feature = FEATURES.find((f) => f.id === name);
+  if (!feature) return; // 未知页签 id：忽略，不报错
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + name));
-  if (name === 'chat') loadChats();
-  if (name === 'settings') loadUsage();
-  if (name === 'create') loadHistory();
+  if (typeof feature.onShow === 'function') feature.onShow();
 }
 
-document.querySelectorAll('.tab-btn').forEach(btn => {
-  btn.addEventListener('click', () => showTab(btn.dataset.tab));
-});
+// 启动时按注册表动态生成页签按钮（第一个为默认激活态，与原 HTML 一致）。
+(function renderTabBar() {
+  const tabBar = $('tabBar');
+  if (!tabBar) return;
+  tabBar.innerHTML = FEATURES.map((f, i) =>
+    '<button class="tab-btn' + (i === 0 ? ' active' : '') + '" data-tab="' + esc(f.id) + '">' + esc(f.label) + '</button>'
+  ).join('');
+  tabBar.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => showTab(btn.dataset.tab));
+  });
+})();
 
 /* 设置页跳转链接（事件委托，覆盖动态生成的提示） */
 document.addEventListener('click', (e) => {
@@ -134,9 +166,11 @@ async function loadProviders() {
   try {
     const data = await api('/api/providers');
     state.providers = {};
-    (data.providers || []).forEach(p => { state.providers[p.name] = p; });
+    state.providerList = data.providers || []; // 已按 order 排好序，供设置页与向导共用
+    state.providerList.forEach(p => { state.providers[p.name] = p; });
     renderSettingsForms(data.providers || []);
     refreshNotConfiguredNotices();
+    maybeShowWizard();
   } catch (e) {
     // 设置页显示加载失败，不白屏
     $('providerForms').innerHTML = '<p class="error">' + esc(e.message) + '</p>';
@@ -205,6 +239,30 @@ function selectedBackend() {
 
 function updateBackendNote() {
   $('backendNote').textContent = BACKEND_NOTES[selectedBackend()] || '';
+  updateGenParamHints();
+}
+
+/* 生成参数注明/禁用状态随后端切换：步数与 CFG 各后端行为不同 */
+const STEPS_HINTS = {
+  instabox: '步数：InstaBox 按设置生效，步数越多细节越丰富、耗时越长。',
+  cloudflare: '步数：Cloudflare 按步数计 Neurons，最多 8 步，超出按 8 步计。',
+  kaggle: '步数：Kaggle 固定 4 步，忽略此处设置。',
+};
+
+function updateGenParamHints() {
+  const backend = selectedBackend();
+  const stepsHint = $('stepsHint');
+  if (stepsHint) stepsHint.textContent = STEPS_HINTS[backend] || '';
+  const cfgInput = $('genCfg');
+  const cfgHint = $('cfgHint');
+  if (!cfgInput || !cfgHint) return;
+  if (backend === 'instabox') {
+    cfgInput.disabled = false;
+    cfgHint.textContent = 'CFG：仅 InstaBox 生效，越高越贴合提示词，默认 7。';
+  } else {
+    cfgInput.disabled = true;
+    cfgHint.textContent = 'CFG：FLUX 后端固定 cfg 1.0，此处设置不生效。';
+  }
 }
 
 document.querySelectorAll('input[name="genBackend"]').forEach(r => {
@@ -325,14 +383,23 @@ $('genBtn').addEventListener('click', async () => {
   if (!prompt) { showError(errEl, '请先输入提示词'); return; }
   const backend = selectedBackend();
   const size = document.querySelector('input[name="genSize"]:checked').value;
-  const width = size === 'square' ? 1024 : 512;
-  const height = size === 'square' ? 1024 : 768;
+  const sizes = {
+    square: { width: 1024, height: 1024 },
+    portrait: { width: 512, height: 768 },
+    landscape: { width: 768, height: 512 },
+  };
+  const { width, height } = sizes[size] || sizes.portrait;
+  // 步数/CFG 前端先夹取一次，后端还会再归一化（非法值不报错，只夹取）。
+  const stepsRaw = parseInt($('genSteps').value, 10);
+  const steps = Number.isFinite(stepsRaw) ? Math.min(50, Math.max(1, stepsRaw)) : 20;
+  const cfgRaw = parseFloat($('genCfg').value);
+  const cfg = Number.isFinite(cfgRaw) ? Math.min(20, Math.max(1, cfgRaw)) : 7;
 
   const btn = $('genBtn');
   btn.disabled = true;
   btn.textContent = '提交中…';
   try {
-    const data = await postJSON('/api/generate', { backend, prompt, width, height, steps: 20 });
+    const data = await postJSON('/api/generate', { backend, prompt, width, height, steps, cfg });
     if (!data.generationId) throw new Error('服务器没有返回任务编号');
     startJobPolling(data.generationId, 'image');
   } catch (e) {
@@ -464,26 +531,80 @@ $('framePicker').addEventListener('click', (e) => {
 
 /* ---------- 对话/代码 ---------- */
 
-const CHAT_MODELS = {
-  zhipu: [
-    { value: 'glm-4.7-flash', label: 'GLM-4.7-Flash' },
-    { value: 'glm-4.5-flash', label: 'GLM-4.5-Flash' },
-  ],
-  groq: [
-    { value: 'openai/gpt-oss-120b', label: 'gpt-oss-120b' },
-    { value: 'openai/gpt-oss-20b', label: 'gpt-oss-20b' },
-    { value: 'qwen/qwen3.8-27b', label: 'Qwen3 8-27b' },
-  ],
-  cloudflare: [
-    { value: '@cf/meta/llama-3.1-8b-instruct-fp8', label: 'Llama-3.1-8B-Instruct' },
-  ],
+/* 模型配置：单一来源是后端 lib/models.json，前端通过 GET /api/models 拉取。
+   请求失败时回落到下面的最小内置默认值（与后端配置值一致），保证页面不崩。 */
+const MODEL_FALLBACK = {
+  chat: {
+    zhipu: {
+      default: 'glm-4.7-flash',
+      models: [
+        { id: 'glm-4.7-flash', label: 'GLM-4.7-Flash' },
+        { id: 'glm-4.5-flash', label: 'GLM-4.5-Flash' },
+      ],
+    },
+    groq: {
+      default: 'openai/gpt-oss-120b',
+      models: [
+        { id: 'openai/gpt-oss-120b', label: 'gpt-oss-120b' },
+        { id: 'openai/gpt-oss-20b', label: 'gpt-oss-20b' },
+        { id: 'qwen/qwen3.8-27b', label: 'Qwen3 8-27b' },
+      ],
+    },
+    cloudflare: {
+      default: '@cf/meta/llama-3.1-8b-instruct-fp8',
+      models: [
+        { id: '@cf/meta/llama-3.1-8b-instruct-fp8', label: 'Llama-3.1-8B-Instruct' },
+      ],
+    },
+    gemini: {
+      default: 'gemini-3.8-flash',
+      models: [
+        { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
+        { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite' },
+      ],
+    },
+  },
+  tts: {
+    elevenlabs: {
+      default: 'EXAVITQu4vr4xnSDxMaL',
+      voices: [
+        { id: 'EXAVITQu4vr4xnSDxMaL', label: 'Sarah' },
+        { id: 'Xb7hH8MSUJpSbSDYk0k2', label: 'Alice' },
+        { id: 'pNInz6obpgDQGcFmaJgB', label: 'Adam' },
+        { id: 'hpp4J3VqNfWAUOO0d1Us', label: 'Bella' },
+        { id: 'JBFqnCBsd6RMkjVDRZzb', label: 'George' },
+      ],
+    },
+  },
 };
+
+// 当前生效的模型配置：先用内置默认值同步渲染下拉，loadModels 拉到后端配置后再刷新。
+let modelConfig = MODEL_FALLBACK;
+
+async function loadModels() {
+  try {
+    const data = await api('/api/models');
+    if (data && data.models && data.models.chat) {
+      modelConfig = data.models;
+      refreshChatModels();
+      refreshTtsVoices();
+    }
+  } catch (e) {
+    console.warn('[app] 加载 /api/models 失败，使用内置默认模型配置：', e.message);
+  }
+}
+
+function chatModelsFor(provider) {
+  const entry = modelConfig.chat && modelConfig.chat[provider];
+  return (entry && entry.models) || [];
+}
 
 function refreshChatModels() {
   const provider = $('chatProvider').value;
-  const models = CHAT_MODELS[provider] || [];
+  const entry = modelConfig.chat && modelConfig.chat[provider];
+  const models = chatModelsFor(provider);
   $('chatModel').innerHTML = models.map(m =>
-    '<option value="' + esc(m.value) + '">' + esc(m.label) + '</option>').join('');
+    '<option value="' + esc(m.id) + '"' + (entry && m.id === entry.default ? ' selected' : '') + '>' + esc(m.label) + '</option>').join('');
 }
 
 function refreshChatNotConfigured() {
@@ -552,7 +673,7 @@ $('chatList').addEventListener('click', async (e) => {
     const data = await api('/api/chats/' + encodeURIComponent(id));
     state.currentChatId = id;
     const chat = data.chat || {};
-    if (chat.provider && CHAT_MODELS[chat.provider]) {
+    if (chat.provider && chatModelsFor(chat.provider).length) {
       $('chatProvider').value = chat.provider;
       refreshChatModels();
       if (chat.model) $('chatModel').value = chat.model;
@@ -614,13 +735,17 @@ $('chatSendBtn').addEventListener('click', async () => {
 
 function refreshAnalyzeNotConfigured() {
   const mode = document.querySelector('input[name="analyzeMode"]:checked').value;
-  setNotConfigured($('analyzeNotConfigured'), mode === 'ocr' ? 'siliconflow' : 'zhipu');
+  const provider = mode === 'ocr' ? 'siliconflow' : $('analyzeProvider').value;
+  setNotConfigured($('analyzeNotConfigured'), provider);
   $('analyzeQuestionWrap').classList.toggle('hidden', mode === 'ocr');
+  $('analyzeProviderWrap').classList.toggle('hidden', mode === 'ocr');
 }
 
 document.querySelectorAll('input[name="analyzeMode"]').forEach(r => {
   r.addEventListener('change', refreshAnalyzeNotConfigured);
 });
+
+$('analyzeProvider').addEventListener('change', refreshAnalyzeNotConfigured);
 
 $('analyzeFile').addEventListener('change', async (e) => {
   const file = e.target.files[0];
@@ -657,7 +782,7 @@ $('analyzeBtn').addEventListener('click', async () => {
   btn.textContent = '识别中…';
   try {
     const data = await postJSON('/api/analyze', {
-      provider: mode === 'ocr' ? 'siliconflow' : 'zhipu',
+      provider: mode === 'ocr' ? 'siliconflow' : $('analyzeProvider').value,
       mode,
       imageBase64: state.analyzeImage.base64,
       mimeType: state.analyzeImage.mimeType,
@@ -712,6 +837,16 @@ function refreshTtsNotConfigured() {
   setNotConfigured($('ttsNotConfigured'), $('ttsProvider').value);
 }
 
+// TTS 音色下拉：从模型配置（/api/models，失败时用内置默认值）填充；
+// 默认音色后带“（默认）”，与原 HTML 写死列表的显示一致。
+function refreshTtsVoices() {
+  const entry = modelConfig.tts && modelConfig.tts.elevenlabs;
+  const voices = (entry && entry.voices) || [];
+  $('ttsVoice').innerHTML = voices.map(v =>
+    '<option value="' + esc(v.id) + '"' + (entry && v.id === entry.default ? ' selected' : '') + '>'
+    + esc(v.label) + (entry && v.id === entry.default ? '（默认）' : '') + '</option>').join('');
+}
+
 $('ttsProvider').addEventListener('change', () => {
   const isEleven = $('ttsProvider').value === 'elevenlabs';
   $('ttsVoiceWrap').classList.toggle('hidden', !isEleven);
@@ -743,6 +878,11 @@ $('ttsBtn').addEventListener('click', async () => {
       });
     } catch (e) {
       throw new Error('网络请求失败，请检查服务是否启动');
+    }
+    // TTS 直接用 fetch（要收音频流），401 时同样跳回登录遮罩
+    if (res.status === 401) {
+      showLoginOverlay();
+      throw new Error('登录已过期，请重新登录');
     }
     const contentType = res.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {
@@ -894,23 +1034,7 @@ $('embedBtn').addEventListener('click', async () => {
 
 /* ---------- 设置：供应商配置 ---------- */
 
-/* 各供应商需要填写的字段（label 为中文说明） */
-const PROVIDER_FIELDS = {
-  zhipu: [{ key: 'apiKey', label: 'API Key', type: 'password' }],
-  groq: [{ key: 'apiKey', label: 'API Key', type: 'password' }],
-  cloudflare: [
-    { key: 'apiKey', label: 'API Token', type: 'password' },
-    { key: 'accountId', label: 'Account ID', type: 'text' },
-  ],
-  deepl: [{ key: 'apiKey', label: 'API Key', type: 'password' }],
-  elevenlabs: [{ key: 'apiKey', label: 'API Key', type: 'password' }],
-  siliconflow: [{ key: 'apiKey', label: 'API Key', type: 'password' }],
-  kaggle: [
-    { key: 'username', label: '用户名', type: 'text' },
-    { key: 'apiKey', label: 'API Key', type: 'password' },
-  ],
-  instabox: [{ key: 'proxyUrl', label: '代理地址', type: 'text', placeholder: '形如 https://3001-xxx.instabox.tech' }],
-};
+/* 各供应商需要填写的字段由 GET /api/providers 返回（p.fields），不再本地硬编码 */
 
 function renderSettingsForms(providers) {
   const box = $('providerForms');
@@ -919,13 +1043,13 @@ function renderSettingsForms(providers) {
     return;
   }
   box.innerHTML = providers.map(p => {
-    const fields = PROVIDER_FIELDS[p.name] || [{ key: 'apiKey', label: 'API Key', type: 'password' }];
+    const fields = p.fields || [{ key: 'apiKey', label: 'API Key', type: 'password' }];
     const inputs = fields.map(f =>
       '<label class="field-label" for="pf-' + esc(p.name) + '-' + esc(f.key) + '">' + esc(f.label) + '</label>'
       + '<input id="pf-' + esc(p.name) + '-' + esc(f.key) + '" type="' + esc(f.type) + '" data-provider="' + esc(p.name) + '" data-field="' + esc(f.key) + '" placeholder="' + esc(f.placeholder || '') + '" autocomplete="off">'
     ).join('');
     return '<div class="provider-form" data-provider-form="' + esc(p.name) + '">'
-      + '<h3>' + esc(p.label || PROVIDER_LABELS[p.name] || p.name) + ' '
+      + '<h3>' + esc(p.label || providerLabel(p.name)) + ' '
       + '<span class="' + (p.configured ? 'configured' : 'not-configured') + '">'
       + (p.configured ? '已配置' : '未配置') + '</span></h3>'
       + (p.quotaNote ? '<p class="quota">' + esc(p.quotaNote) + '</p>' : '')
@@ -970,6 +1094,143 @@ $('providerForms').addEventListener('click', async (e) => {
     btn.disabled = false;
     btn.textContent = '保存';
   }
+});
+
+/* ---------- 首次启动配置向导 ---------- */
+
+/* 向导顺序与申请链接来自 GET /api/providers（state.providerList 已按 order 排好序） */
+function wizardOrder() {
+  if (state.providerList && state.providerList.length) return state.providerList.map(p => p.name);
+  return Object.keys(state.providers);
+}
+
+const WIZARD_DISMISSED_KEY = 'wizardDismissed';
+
+const wizard = { step: 0 };
+let wizardAutoChecked = false; // 自动弹出只在页面加载后判断一次
+
+function wizardCreds(name) {
+  const body = {};
+  document.querySelectorAll('input[data-wizard-provider="' + name + '"]').forEach(input => {
+    const v = input.value.trim();
+    if (v) body[input.dataset.field] = v;
+  });
+  return body;
+}
+
+function renderWizardStep() {
+  const order = wizardOrder();
+  const name = order[wizard.step];
+  const isLast = wizard.step === order.length - 1;
+  const label = providerLabel(name);
+  const meta = state.providers[name] || {};
+  const quota = meta.quotaNote || '';
+  const fields = meta.fields || [{ key: 'apiKey', label: 'API Key', type: 'password' }];
+  const applyUrl = meta.applyUrl || '';
+
+  $('wizardStep').textContent = '第 ' + (wizard.step + 1) + ' / ' + order.length + ' 步';
+  $('wizardBody').innerHTML =
+    '<h3>' + esc(label) + '</h3>'
+    + (quota ? '<p class="hint">' + esc(quota) + '</p>' : '')
+    + (applyUrl ? '<p><a href="' + esc(applyUrl) + '" target="_blank" rel="noopener noreferrer">去申请 →</a></p>' : '')
+    + fields.map(f =>
+      '<label class="field-label" for="wz-' + esc(name) + '-' + esc(f.key) + '">' + esc(f.label) + '</label>'
+      + '<input id="wz-' + esc(name) + '-' + esc(f.key) + '" type="' + esc(f.type) + '" data-wizard-provider="' + esc(name) + '" data-field="' + esc(f.key) + '" placeholder="' + esc(f.placeholder || '') + '" autocomplete="off">'
+    ).join('')
+    + '<p class="error hidden" id="wizardError"></p>'
+    + '<p class="hint hidden" id="wizardOk"></p>'
+    + '<div class="wizard-actions">'
+    + '<button class="btn" id="wizardTestBtn">测试连接</button>'
+    + '<button class="btn primary" id="wizardNextBtn">' + (isLast ? '完成' : '保存并下一步') + '</button>'
+    + '<button class="btn" id="wizardSkipBtn">跳过</button>'
+    + '</div>';
+
+  $('wizardTestBtn').addEventListener('click', async () => {
+    const errEl = $('wizardError');
+    const okEl = $('wizardOk');
+    hideError(errEl);
+    if (okEl) okEl.classList.add('hidden');
+    const btn = $('wizardTestBtn');
+    btn.disabled = true;
+    btn.textContent = '测试中…';
+    try {
+      await postJSON('/api/providers/' + encodeURIComponent(name) + '/test', wizardCreds(name));
+      if (okEl) {
+        okEl.textContent = '连接成功，Key 可用。';
+        okEl.classList.remove('hidden');
+      }
+    } catch (e) {
+      showError(errEl, e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '测试连接';
+    }
+  });
+
+  $('wizardNextBtn').addEventListener('click', async () => {
+    const errEl = $('wizardError');
+    hideError(errEl);
+    const body = wizardCreds(name);
+    if (!Object.keys(body).length) {
+      showError(errEl, '请填写后保存，或点“跳过”直接下一步');
+      return;
+    }
+    const btn = $('wizardNextBtn');
+    btn.disabled = true;
+    btn.textContent = '保存中…';
+    try {
+      await postJSON('/api/providers/' + encodeURIComponent(name), body);
+      advanceWizard();
+    } catch (e) {
+      showError(errEl, e.message);
+      btn.disabled = false;
+      btn.textContent = isLast ? '完成' : '保存并下一步';
+    }
+  });
+
+  $('wizardSkipBtn').addEventListener('click', advanceWizard);
+}
+
+function advanceWizard() {
+  if (wizard.step >= wizardOrder().length - 1) {
+    closeWizard();
+  } else {
+    wizard.step += 1;
+    renderWizardStep();
+  }
+}
+
+function openWizard() {
+  wizard.step = 0;
+  renderWizardStep();
+  $('wizardOverlay').classList.remove('hidden');
+  document.body.classList.add('wizard-open');
+}
+
+async function closeWizard() {
+  $('wizardOverlay').classList.add('hidden');
+  document.body.classList.remove('wizard-open');
+  try { localStorage.setItem(WIZARD_DISMISSED_KEY, '1'); } catch (_) { /* 隐私模式忽略 */ }
+  await loadProviders();
+  await loadStatus();
+}
+
+/* 页面加载后判断一次：8 个供应商全部未配置且用户没跳过过，才自动弹出向导。 */
+function maybeShowWizard() {
+  if (wizardAutoChecked) return;
+  wizardAutoChecked = true;
+  let dismissed = false;
+  try { dismissed = localStorage.getItem(WIZARD_DISMISSED_KEY) === '1'; } catch (_) { /* 隐私模式忽略 */ }
+  if (dismissed) return;
+  const providers = Object.values(state.providers);
+  if (!providers.length) return;
+  if (providers.every(p => !p.configured)) openWizard();
+}
+
+/* 设置页手动重新打开向导：清除跳过标记并显示向导。 */
+$('reopenWizardBtn').addEventListener('click', () => {
+  try { localStorage.removeItem(WIZARD_DISMISSED_KEY); } catch (_) { /* 隐私模式忽略 */ }
+  openWizard();
 });
 
 /* ---------- 设置：剩余用量 ---------- */
@@ -1023,11 +1284,163 @@ async function loadUsage() {
 
 $('usageRefreshBtn').addEventListener('click', loadUsage);
 
+/* ---------- 设置：数据备份 ---------- */
+
+function backupOk(msg) {
+  const okEl = $('backupOk');
+  if (!okEl) return;
+  okEl.textContent = msg;
+  okEl.classList.remove('hidden');
+}
+
+function hideBackupMessages() {
+  hideError($('backupError'));
+  const okEl = $('backupOk');
+  if (okEl) okEl.classList.add('hidden');
+}
+
+$('backupExportBtn').addEventListener('click', async () => {
+  hideBackupMessages();
+  const btn = $('backupExportBtn');
+  btn.disabled = true;
+  btn.textContent = '导出中…';
+  try {
+    const data = await api('/api/backup/export');
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const d = new Date();
+    const stamp = d.getFullYear()
+      + String(d.getMonth() + 1).padStart(2, '0')
+      + String(d.getDate()).padStart(2, '0');
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'free-ai-tool-station-backup-' + stamp + '.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    backupOk('已导出 ' + (data.history || []).length + ' 条历史、'
+      + (data.chats || []).length + ' 个会话。备份不含 Key 与生成文件，请另行保存 Key。');
+  } catch (e) {
+    showError($('backupError'), e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '导出数据';
+  }
+});
+
+$('backupImportBtn').addEventListener('click', () => {
+  $('backupFileInput').click();
+});
+
+$('backupFileInput').addEventListener('change', async () => {
+  const input = $('backupFileInput');
+  const file = input.files && input.files[0];
+  input.value = ''; // 清空，允许重复选同一文件
+  if (!file) return;
+  hideBackupMessages();
+  let text;
+  try {
+    text = await file.text();
+  } catch (e) {
+    showError($('backupError'), '读取文件失败，请重试');
+    return;
+  }
+  let backup;
+  try {
+    backup = JSON.parse(text);
+  } catch (e) {
+    showError($('backupError'), '文件不是有效的 JSON 备份');
+    return;
+  }
+  if (!window.confirm('将合并导入备份：现有数据保留，重复记录不重复导入，Key 不会被恢复。确定导入吗？')) {
+    return;
+  }
+  const btn = $('backupImportBtn');
+  btn.disabled = true;
+  btn.textContent = '导入中…';
+  try {
+    const result = await postJSON('/api/backup/import', backup);
+    const imported = result.imported || {};
+    backupOk('导入完成：新增 ' + (imported.history || 0) + ' 条历史、'
+      + (imported.chats || 0) + ' 个会话，用量已更新。');
+    loadUsage();
+    loadHistory();
+    loadChats();
+  } catch (e) {
+    showError($('backupError'), e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '导入数据';
+  }
+});
+
+/* ---------- 访问密码保护 ---------- */
+
+function showLoginOverlay() {
+  $('loginOverlay').classList.remove('hidden');
+  document.body.classList.add('login-open');
+  const input = $('loginPassword');
+  if (input) input.focus();
+}
+
+function hideLoginOverlay() {
+  $('loginOverlay').classList.add('hidden');
+  document.body.classList.remove('login-open');
+}
+
+async function submitLogin() {
+  const input = $('loginPassword');
+  const errEl = $('loginError');
+  const btn = $('loginBtn');
+  hideError(errEl);
+  const password = input.value;
+  if (!password) { showError(errEl, '请输入访问密码'); return; }
+  btn.disabled = true;
+  btn.textContent = '登录中…';
+  try {
+    await postJSON('/api/login', { password });
+    input.value = '';
+    hideLoginOverlay();
+    initApp();
+  } catch (e) {
+    showError(errEl, e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '登录';
+  }
+}
+
+$('loginBtn').addEventListener('click', submitLogin);
+$('loginPassword').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') submitLogin();
+});
+
 /* ---------- 初始化 ---------- */
 
-refreshChatModels();
-updateBackendNote();
-loadProviders();
-loadStatus();
-loadHistory();
-loadUsage();
+function initApp() {
+  refreshChatModels();
+  refreshTtsVoices();
+  loadModels();
+  updateBackendNote();
+  loadProviders();
+  loadStatus();
+  loadHistory();
+  loadUsage();
+}
+
+/* 先查登录状态：需要登录且未登录时只显示登录遮罩，不发起数据请求；
+   状态接口不通时按不设防处理（后续请求会按原有逻辑报网络错误）。 */
+async function initAuth() {
+  let s = { authRequired: false, authenticated: true };
+  try {
+    s = await api('/api/auth/status');
+  } catch (e) { /* 状态接口不通，按不设防处理 */ }
+  if (s.authRequired && !s.authenticated) {
+    showLoginOverlay();
+    return;
+  }
+  initApp();
+}
+
+initAuth();
