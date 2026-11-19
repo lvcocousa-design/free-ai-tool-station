@@ -4,13 +4,29 @@
 // - 静态托管 public/（前端单页应用）
 // - /blobs 映射到 data/blobs/（只允许该目录内的文件）
 // - 自动加载 lib/routes/*.js（每个模块导出 registerRoutes(app, ctx)）
+// - 可选访问密码保护：设置 ACCESS_PASSWORD 后 /api/* 与 /blobs/* 需登录
+//   （lib/auth.js 中间件；/api/login、/api/health、/api/auth/status 不设防）
+// - 按 IP 限流（lib/rate-limit.js 中间件，挂在 requireAuth 之后）：
+//   生成类重操作默认每 IP 每分钟 60 次，查询类默认 300 次；
+//   GET /api/health 与 POST /api/login 不限流；超限返回 429
 // - 监听 PORT 环境变量（默认 8080）
 
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
+
+// 存储层先加载：STORAGE_BACKEND=s3 但缺配置时在这里抛错，
+// 打印清晰中文错误后退出，不静默回落到本地（那样会造成数据已持久化的错觉）。
+let store;
+try {
+  store = require('./lib/storage');
+} catch (err) {
+  console.error(`[server] 启动失败：${err.message}`);
+  process.exit(1);
+}
 const { createContext } = require('./lib/context');
-const store = require('./lib/storage');
+const auth = require('./lib/auth');
+const rateLimiter = require('./lib/rate-limit');
 
 const app = express();
 
@@ -28,11 +44,39 @@ app.use((err, req, res, next) => {
   return next(err);
 });
 
+// 访问密码保护（可选）：挂在静态托管与路由加载之前，确保 /blobs 也被保护。
+// 未设置 ACCESS_PASSWORD 时中间件直接放行；静态前端本身不设防，由前端
+// 查 /api/auth/status 决定是否显示登录页。
+app.use(auth.requireAuth);
+
+// 按 IP 限流（lib/rate-limit.js）：挂在 requireAuth 之后，未登录请求先
+// 返回 401，不占用限流配额；非 /api/* 路径与健康检查、登录接口不限流。
+app.use(rateLimiter.rateLimit);
+
 // 前端静态文件（public/ 由前端代理实现；目录不存在时 express.static 只会 404，不报错）。
 app.use(express.static(path.join(__dirname, 'public')));
 
-// 生成的成品文件：只映射 data/blobs/ 目录，express.static 本身会阻止 ../ 穿透。
-app.use('/blobs', express.static(store.blobsDir));
+// 生成的成品文件：
+// - 本地后端：只映射 data/blobs/ 目录，express.static 本身会阻止 ../ 穿透。
+// - S3 后端：经存储层 readBlob 从桶里取回并按扩展名设 Content-Type 返回，
+//   不存在返回 404（readBlob 内部已做 basename 清洗，防止 ../ 穿透）。
+if (store.getBackendName() === 's3') {
+  app.get('/blobs/:filename', async (req, res) => {
+    try {
+      const buffer = await store.readBlob(req.params.filename);
+      res.set('Content-Type', store.contentTypeForExt(path.extname(req.params.filename)));
+      res.send(buffer);
+    } catch (err) {
+      if (err && err.status === 404) {
+        return res.status(404).json({ ok: false, message: '文件不存在' });
+      }
+      console.error('[server] 读取 blob 失败:', err.message);
+      res.status(500).json({ ok: false, message: '读取文件失败，请稍后重试' });
+    }
+  });
+} else {
+  app.use('/blobs', express.static(store.blobsDir));
+}
 
 const ctx = createContext();
 
@@ -81,7 +125,12 @@ if (!Number.isInteger(port) || port <= 0 || port > 65535) {
 
 const server = app.listen(port, () => {
   console.log(`[server] 免费AI工具站后端已启动：http://localhost:${port}`);
-  console.log(`[server] 数据目录：${store.dataDir}`);
+  console.log(`[server] 存储后端：${store.getBackendName()}`);
+  console.log(`[server] 访问保护：${auth.isAuthEnabled() ? '已启用' : '未启用（公开访问）'}`);
+  console.log(`[server] 限流：${rateLimiter.describeRateLimit()}`);
+  if (store.getBackendName() === 'local') {
+    console.log(`[server] 数据目录：${store.dataDir}`);
+  }
 });
 
 server.on('error', (err) => {

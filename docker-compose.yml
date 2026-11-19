@@ -1,0 +1,16 @@
+# 免费AI工具站（自部署版）Docker Compose 配置
+# 用法：
+#   cp .env.example .env   # 填入各家 Key，不用的供应商可留空
+#   docker compose up -d
+# 打开 http://localhost:8080 即可使用。
+# ./data 目录挂载到容器内 /app/data，历史记录和设置持久保存在项目目录的 data/ 里。
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
+    restart: unless-stopped

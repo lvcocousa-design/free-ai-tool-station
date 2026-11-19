@@ -1,1 +1,1 @@
-{"dependencies":{"express":"^4.21.2"},"description":"免费AI工具站（自部署复刻版）—— Express 后端，JSON 文件存储","engines":{"node":">=18"},"main":"server.js","name":"free-ai-tool-station","scripts":{"start":"node server.js"},"version":"0.1.0"}
+{"dependencies":{"express":"^4.21.2"},"description":"免费AI工具站（自部署复刻版）—— Express 后端，JSON 文件存储","engines":{"node":">=18"},"main":"server.js","name":"free-ai-tool-station","scripts":{"start":"node server.js","test":"node --test"},"version":"0.1.0"}
