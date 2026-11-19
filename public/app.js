@@ -1,0 +1,1033 @@
+/* 免费AI工具站前端 — 原生 JS，无框架无 CDN 依赖。
+   所有接口按契约调用后端 /api/*；前端不保存任何真实 Key。 */
+'use strict';
+
+/* ---------- 通用工具 ---------- */
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function $(id) { return document.getElementById(id); }
+
+function showError(el, msg) {
+  if (!el) return;
+  el.textContent = msg || '请求失败，请稍后重试';
+  el.classList.remove('hidden');
+}
+function hideError(el) { if (el) el.classList.add('hidden'); }
+
+async function api(path, options) {
+  let res;
+  try {
+    res = await fetch(path, options);
+  } catch (e) {
+    throw new Error('网络请求失败，请检查服务是否启动');
+  }
+  let data;
+  try {
+    data = await res.json();
+  } catch (e) {
+    throw new Error('服务器返回异常（HTTP ' + res.status + '）');
+  }
+  if (data && data.ok === false) {
+    const err = new Error(data.message || '请求失败');
+    err.notConfigured = !!data.notConfigured;
+    err.offline = !!data.offline;
+    throw err;
+  }
+  return data;
+}
+
+function postJSON(path, body) {
+  return api(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+/* 文件转 base64（不含 data: 前缀），返回 {base64, mimeType} */
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result;
+      const comma = dataUrl.indexOf(',');
+      resolve({ base64: dataUrl.slice(comma + 1), mimeType: file.type || 'application/octet-stream' });
+    };
+    reader.onerror = () => reject(new Error('读取文件失败'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function fmtNum(n) { return Number(n || 0).toLocaleString('en-US'); }
+
+/* ---------- 全局状态 ---------- */
+
+const state = {
+  providers: {},        // name -> {configured, label, quotaNote}
+  status: null,         // GET /api/status 结果
+  history: [],          // GET /api/history 结果
+  currentJob: null,     // {id, startedAt}
+  pollTimer: null,
+  currentChatId: null,
+  analyzeImage: null,   // {base64, mimeType}
+  sttAudio: null,       // {base64, mimeType}
+  selectedFrameId: null,
+};
+
+const PROVIDER_LABELS = {
+  zhipu: '智谱 z.ai', groq: 'Groq', cloudflare: 'Cloudflare',
+  deepl: 'DeepL', elevenlabs: 'ElevenLabs', siliconflow: '硅基流动',
+  kaggle: 'Kaggle', instabox: 'InstaBox',
+};
+
+const BACKEND_NOTES = {
+  instabox: '免费 CPU 出图，约 4 分钟一张，适合日常出图。',
+  kaggle: '免费 GPU（FLUX），画质更好，约 5–10 分钟加排队，耗每周 30 小时额度。',
+  cloudflare: '免费极速出图（FLUX schnell），每天 10,000 Neurons，适合快速试效果。',
+};
+
+const BACKEND_LABELS = { instabox: 'InstaBox CPU', kaggle: 'Kaggle GPU', cloudflare: 'Cloudflare' };
+
+/* 未配置提示：显示在对应功能区，带跳转设置页的链接 */
+function notConfiguredHTML(providerName) {
+  const label = PROVIDER_LABELS[providerName] || providerName;
+  return esc(label) + ' 未配置，请先去<a href="#" data-goto-settings>设置页</a>填写 Key。';
+}
+function setNotConfigured(el, providerName) {
+  if (!el) return;
+  if (providerName && !state.providers[providerName]?.configured) {
+    el.innerHTML = notConfiguredHTML(providerName);
+    el.classList.remove('hidden');
+  } else {
+    el.classList.add('hidden');
+  }
+}
+
+/* ---------- 页签切换 ---------- */
+
+function showTab(name) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + name));
+  if (name === 'chat') loadChats();
+  if (name === 'settings') loadUsage();
+  if (name === 'create') loadHistory();
+}
+
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => showTab(btn.dataset.tab));
+});
+
+/* 设置页跳转链接（事件委托，覆盖动态生成的提示） */
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('[data-goto-settings]');
+  if (a) { e.preventDefault(); showTab('settings'); }
+});
+
+/* ---------- 启动时加载：供应商配置 + 后端状态 ---------- */
+
+async function loadProviders() {
+  try {
+    const data = await api('/api/providers');
+    state.providers = {};
+    (data.providers || []).forEach(p => { state.providers[p.name] = p; });
+    renderSettingsForms(data.providers || []);
+    refreshNotConfiguredNotices();
+  } catch (e) {
+    // 设置页显示加载失败，不白屏
+    $('providerForms').innerHTML = '<p class="error">' + esc(e.message) + '</p>';
+  }
+}
+
+async function loadStatus() {
+  const box = $('createStatus');
+  try {
+    const s = await api('/api/status');
+    state.status = s;
+    const instabox = s.instabox || {};
+    const kaggle = s.kaggle || {};
+    const cf = s.cloudflare || {};
+    const parts = [];
+    if (instabox.configured) {
+      parts.push('InstaBox：' + (instabox.online
+        ? '<span class="online">在线</span>'
+        : '<span class="offline">不在线</span>'));
+    } else {
+      parts.push('InstaBox：<span class="offline">未配置</span>');
+    }
+    parts.push('Kaggle：' + (kaggle.configured ? '<span class="online">已配置</span>' : '<span class="offline">未配置</span>'));
+    parts.push('Cloudflare：' + (cf.configured ? '<span class="online">已配置</span>' : '<span class="offline">未配置</span>'));
+    box.innerHTML = parts.join('　·　');
+    applyBackendAvailability();
+  } catch (e) {
+    box.innerHTML = '<span class="offline">状态检查失败：' + esc(e.message) + '</span>';
+  }
+}
+
+/* 按配置/在线状态禁用后端选项 */
+function applyBackendAvailability() {
+  const s = state.status || {};
+  const instaboxOk = !!(s.instabox && s.instabox.configured && s.instabox.online);
+  const kaggleOk = !!(s.kaggle && s.kaggle.configured);
+  const cfOk = !!(s.cloudflare && s.cloudflare.configured);
+  const avail = { instabox: instaboxOk, kaggle: kaggleOk, cloudflare: cfOk };
+
+  Object.keys(avail).forEach(name => {
+    const radio = document.querySelector('input[name="genBackend"][value="' + name + '"]');
+    const label = $('backendLabel-' + name);
+    if (!radio || !label) return;
+    radio.disabled = !avail[name];
+    radio.closest('.radio').classList.toggle('disabled', !avail[name]);
+    let suffix = '';
+    if (name === 'instabox' && s.instabox && s.instabox.configured && !s.instabox.online) suffix = '（不在线）';
+    else if (!avail[name]) suffix = '（未配置）';
+    label.textContent = BACKEND_LABELS[name] + suffix;
+  });
+
+  // 当前选中项不可用时，自动切到第一个可用后端
+  const checked = document.querySelector('input[name="genBackend"]:checked');
+  if (checked && checked.disabled) {
+    const firstOk = document.querySelector('input[name="genBackend"]:not(:disabled)');
+    if (firstOk) firstOk.checked = true;
+  }
+  updateBackendNote();
+  refreshCreateNotConfigured();
+}
+
+function selectedBackend() {
+  const r = document.querySelector('input[name="genBackend"]:checked');
+  return r ? r.value : 'cloudflare';
+}
+
+function updateBackendNote() {
+  $('backendNote').textContent = BACKEND_NOTES[selectedBackend()] || '';
+}
+
+document.querySelectorAll('input[name="genBackend"]').forEach(r => {
+  r.addEventListener('change', updateBackendNote);
+});
+
+/* 创作页未配置提示（按当前选中后端） */
+function refreshCreateNotConfigured() {
+  const backend = selectedBackend();
+  const map = { instabox: 'instabox', kaggle: 'kaggle', cloudflare: 'cloudflare' };
+  setNotConfigured($('genNotConfigured'), map[backend]);
+  setNotConfigured($('videoNotConfigured'), 'kaggle');
+}
+
+function refreshNotConfiguredNotices() {
+  refreshCreateNotConfigured();
+  refreshChatNotConfigured();
+  refreshAnalyzeNotConfigured();
+  refreshTranslateNotConfigured();
+  refreshTtsNotConfigured();
+  refreshSttNotConfigured();
+  refreshEmbedNotConfigured();
+  applyBackendAvailability();
+}
+
+/* ---------- 创作：模式切换 ---------- */
+
+$('modeImageBtn').addEventListener('click', () => setCreateMode('image'));
+$('modeVideoBtn').addEventListener('click', () => setCreateMode('video'));
+
+function setCreateMode(mode) {
+  $('modeImageBtn').classList.toggle('active', mode === 'image');
+  $('modeVideoBtn').classList.toggle('active', mode === 'video');
+  $('imageMode').classList.toggle('hidden', mode !== 'image');
+  $('videoMode').classList.toggle('hidden', mode !== 'video');
+  if (mode === 'video') renderFramePicker();
+}
+
+/* ---------- 创作：生成 + 轮询 ---------- */
+
+function elapsedSeconds() {
+  if (!state.currentJob) return 0;
+  return Math.floor((Date.now() - state.currentJob.startedAt) / 1000);
+}
+
+function stopPolling() {
+  if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
+}
+
+function renderOutputJob(job, elapsed) {
+  const statusEl = $('outputStatus');
+  const mediaEl = $('outputMedia');
+  const errEl = $('outputError');
+  hideError(errEl);
+  const typeText = job.type === 'video' ? '视频' : '图片';
+  if (job.status === 'queued' || job.status === 'running' || job.status === 'unknown') {
+    const text = job.status === 'queued' ? '排队中' : job.status === 'running' ? '生成中' : '状态查询中';
+    statusEl.innerHTML = typeText + text + '… 已用 <b>' + elapsed + '</b> 秒';
+    mediaEl.innerHTML = '<p class="muted">请耐心等待，出图约几分钟，视频约 1 小时。</p>';
+  } else if (job.status === 'done') {
+    statusEl.innerHTML = typeText + '已完成，用时 <b>' + elapsed + '</b> 秒';
+    if (job.type === 'video' && job.videoUrl) {
+      mediaEl.innerHTML = '<video src="' + esc(job.videoUrl) + '" controls autoplay playsinline></video>';
+    } else if (job.imageUrl) {
+      mediaEl.innerHTML = '<img src="' + esc(job.imageUrl) + '" alt="' + esc(job.prompt || '') + '">';
+    } else {
+      mediaEl.innerHTML = '<p class="muted">已完成，但没有返回文件。</p>';
+    }
+  } else if (job.status === 'failed') {
+    statusEl.innerHTML = typeText + '生成失败，用时 <b>' + elapsed + '</b> 秒';
+    mediaEl.innerHTML = '';
+    showError(errEl, job.error || '生成失败，请稍后重试');
+  }
+}
+
+async function pollJobOnce() {
+  if (!state.currentJob) return;
+  const id = state.currentJob.id;
+  try {
+    const job = await api('/api/generations/' + encodeURIComponent(id));
+    renderOutputJob(job, elapsedSeconds());
+    if (job.status === 'done' || job.status === 'failed') {
+      stopPolling();
+      state.currentJob = null;
+      loadHistory();
+    }
+  } catch (e) {
+    // 轮询单次失败不中断，继续等下一次；只更新已用秒数
+    const statusEl = $('outputStatus');
+    if (state.currentJob) {
+      statusEl.innerHTML = '生成中… 已用 <b>' + elapsedSeconds() + '</b> 秒（状态查询失败，继续等待）';
+    }
+  }
+}
+
+function startJobPolling(generationId, type) {
+  stopPolling();
+  state.currentJob = { id: generationId, startedAt: Date.now() };
+  renderOutputJob({ type, status: 'queued', prompt: '' }, 0);
+  pollJobOnce();
+  let ticks = 0;
+  state.pollTimer = setInterval(() => {
+    ticks += 1;
+    if (state.currentJob) {
+      // 每秒刷新已用秒数，每 5 秒查一次状态
+      const statusEl = $('outputStatus');
+      const b = statusEl.querySelector('b');
+      if (b) b.textContent = String(elapsedSeconds());
+    }
+    if (ticks % 5 === 0) pollJobOnce();
+  }, 1000);
+}
+
+$('genBtn').addEventListener('click', async () => {
+  const prompt = $('genPrompt').value.trim();
+  const errEl = $('genError');
+  hideError(errEl);
+  if (!prompt) { showError(errEl, '请先输入提示词'); return; }
+  const backend = selectedBackend();
+  const size = document.querySelector('input[name="genSize"]:checked').value;
+  const width = size === 'square' ? 1024 : 512;
+  const height = size === 'square' ? 1024 : 768;
+
+  const btn = $('genBtn');
+  btn.disabled = true;
+  btn.textContent = '提交中…';
+  try {
+    const data = await postJSON('/api/generate', { backend, prompt, width, height, steps: 20 });
+    if (!data.generationId) throw new Error('服务器没有返回任务编号');
+    startJobPolling(data.generationId, 'image');
+  } catch (e) {
+    showError(errEl, e.message);
+    if (e.offline) loadStatus();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '生成图片';
+  }
+});
+
+$('videoBtn').addEventListener('click', async () => {
+  const errEl = $('videoError');
+  hideError(errEl);
+  if (!state.selectedFrameId) { showError(errEl, '请先从历史图片里选一张做首帧'); return; }
+  const prompt = $('videoPrompt').value.trim();
+  if (!prompt) { showError(errEl, '请先输入动作描述'); return; }
+
+  const btn = $('videoBtn');
+  btn.disabled = true;
+  btn.textContent = '提交中…';
+  try {
+    const data = await postJSON('/api/video', { sourceGenerationId: state.selectedFrameId, prompt });
+    if (!data.generationId) throw new Error('服务器没有返回任务编号');
+    startJobPolling(data.generationId, 'video');
+  } catch (e) {
+    showError(errEl, e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '生成视频';
+  }
+});
+
+/* ---------- 创作：历史 ---------- */
+
+async function loadHistory() {
+  const listEl = $('historyList');
+  try {
+    const data = await api('/api/history');
+    state.history = data.history || [];
+    renderHistory();
+    renderFramePicker();
+  } catch (e) {
+    listEl.innerHTML = '<p class="error">' + esc(e.message) + '</p>';
+  }
+}
+
+function historyFileUrl(item) {
+  return item.file ? '/blobs/' + encodeURIComponent(item.file) : null;
+}
+
+function renderHistory() {
+  const listEl = $('historyList');
+  const items = state.history;
+  if (!items.length) {
+    listEl.innerHTML = '<p class="muted">暂无历史记录。</p>';
+    return;
+  }
+  listEl.innerHTML = items.map(item => {
+    const url = historyFileUrl(item);
+    const isVideo = item.type === 'video';
+    let thumb;
+    if (url && isVideo) thumb = '<video src="' + esc(url) + '" preload="metadata" muted></video>';
+    else if (url) thumb = '<img src="' + esc(url) + '" alt="" loading="lazy">';
+    else thumb = '<div class="thumb-placeholder">' + (item.status === 'failed' ? '生成失败' : '生成中…') + '</div>';
+    const tags = '<span class="tag">' + esc(BACKEND_LABELS[item.backend] || item.backend || '') + '</span>'
+      + '<span class="tag' + (isVideo ? ' video' : '') + '">' + (isVideo ? '视频' : '图片') + '</span>'
+      + (item.status === 'failed' ? '<span class="tag failed">失败</span>' : '');
+    return '<button class="history-item" data-history-id="' + esc(item.id) + '">'
+      + thumb
+      + '<div class="meta"><p class="prompt">' + esc(item.prompt || '') + '</p>' + tags + '</div>'
+      + '</button>';
+  }).join('');
+}
+
+$('historyList').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-history-id]');
+  if (!btn) return;
+  const item = state.history.find(h => String(h.id) === btn.dataset.historyId);
+  if (!item) return;
+  loadHistoryItemToOutput(item);
+});
+
+function loadHistoryItemToOutput(item) {
+  stopPolling();
+  state.currentJob = null;
+  const url = historyFileUrl(item);
+  const job = {
+    id: item.id, type: item.type, backend: item.backend, prompt: item.prompt,
+    status: item.status === 'done' ? 'done' : item.status,
+    imageUrl: item.type !== 'video' ? url : undefined,
+    videoUrl: item.type === 'video' ? url : undefined,
+    error: item.error,
+  };
+  renderOutputJob(job, 0);
+  $('outputStatus').innerHTML = (item.type === 'video' ? '视频' : '图片')
+    + ' · ' + esc(BACKEND_LABELS[item.backend] || item.backend || '')
+    + (item.createdAt ? ' · ' + esc(new Date(item.createdAt).toLocaleString('zh-CN')) : '');
+  $('outputCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+$('historyRefreshBtn').addEventListener('click', loadHistory);
+
+/* 生视频首帧选择器：只列已完成的图片 */
+function renderFramePicker() {
+  const picker = $('framePicker');
+  const images = state.history.filter(h => h.type !== 'video' && h.status === 'done' && h.file);
+  if (!images.length) {
+    picker.innerHTML = '<p class="muted">暂无历史图片，请先去出图。</p>';
+    state.selectedFrameId = null;
+    return;
+  }
+  if (!images.some(h => String(h.id) === String(state.selectedFrameId))) {
+    state.selectedFrameId = null;
+  }
+  picker.innerHTML = images.map(h =>
+    '<button class="frame-option' + (String(h.id) === String(state.selectedFrameId) ? ' selected' : '') + '" data-frame-id="' + esc(h.id) + '">'
+    + '<img src="' + esc(historyFileUrl(h)) + '" alt="" loading="lazy">'
+    + '<div class="cap">' + esc(h.prompt || '') + '</div></button>'
+  ).join('');
+}
+
+$('framePicker').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-frame-id]');
+  if (!btn) return;
+  state.selectedFrameId = btn.dataset.frameId;
+  renderFramePicker();
+});
+
+/* ---------- 对话/代码 ---------- */
+
+const CHAT_MODELS = {
+  zhipu: [
+    { value: 'glm-4.7-flash', label: 'GLM-4.7-Flash' },
+    { value: 'glm-4.5-flash', label: 'GLM-4.5-Flash' },
+  ],
+  groq: [
+    { value: 'openai/gpt-oss-120b', label: 'gpt-oss-120b' },
+    { value: 'openai/gpt-oss-20b', label: 'gpt-oss-20b' },
+    { value: 'qwen/qwen3.8-27b', label: 'Qwen3 8-27b' },
+  ],
+  cloudflare: [
+    { value: '@cf/meta/llama-3.1-8b-instruct-fp8', label: 'Llama-3.1-8B-Instruct' },
+  ],
+};
+
+function refreshChatModels() {
+  const provider = $('chatProvider').value;
+  const models = CHAT_MODELS[provider] || [];
+  $('chatModel').innerHTML = models.map(m =>
+    '<option value="' + esc(m.value) + '">' + esc(m.label) + '</option>').join('');
+}
+
+function refreshChatNotConfigured() {
+  setNotConfigured($('chatNotConfigured'), $('chatProvider').value);
+}
+
+$('chatProvider').addEventListener('change', () => {
+  refreshChatModels();
+  refreshChatNotConfigured();
+});
+
+function renderChatMessages(messages) {
+  const box = $('chatMessages');
+  if (!messages || !messages.length) {
+    box.innerHTML = '<p class="muted">还没有消息，在下方输入开始对话。</p>';
+    return;
+  }
+  box.innerHTML = messages.map(m =>
+    '<div class="msg ' + (m.role === 'user' ? 'user' : 'assistant') + '">' + esc(m.content) + '</div>'
+  ).join('');
+  box.scrollTop = box.scrollHeight;
+}
+
+async function loadChats() {
+  const listEl = $('chatList');
+  try {
+    const data = await api('/api/chats');
+    const chats = data.chats || [];
+    if (!chats.length) {
+      listEl.innerHTML = '<p class="muted">暂无会话。</p>';
+      return;
+    }
+    listEl.innerHTML = chats.map(c =>
+      '<div class="chat-item' + (String(c.id) === String(state.currentChatId) ? ' active' : '') + '" data-chat-id="' + esc(c.id) + '">'
+      + '<span class="title">' + esc(c.title || '新会话') + '</span>'
+      + '<button class="del" data-del-chat="' + esc(c.id) + '" title="删除会话">✕</button>'
+      + '</div>'
+    ).join('');
+  } catch (e) {
+    listEl.innerHTML = '<p class="error">' + esc(e.message) + '</p>';
+  }
+}
+
+$('chatList').addEventListener('click', async (e) => {
+  const delBtn = e.target.closest('[data-del-chat]');
+  if (delBtn) {
+    e.stopPropagation();
+    if (!confirm('确定删除这个会话吗？')) return;
+    const id = delBtn.dataset.delChat;
+    try {
+      await api('/api/chats/' + encodeURIComponent(id), { method: 'DELETE' });
+      if (String(state.currentChatId) === String(id)) {
+        state.currentChatId = null;
+        renderChatMessages([]);
+      }
+      loadChats();
+    } catch (err) {
+      alert(err.message);
+    }
+    return;
+  }
+  const item = e.target.closest('[data-chat-id]');
+  if (!item) return;
+  const id = item.dataset.chatId;
+  try {
+    const data = await api('/api/chats/' + encodeURIComponent(id));
+    state.currentChatId = id;
+    const chat = data.chat || {};
+    if (chat.provider && CHAT_MODELS[chat.provider]) {
+      $('chatProvider').value = chat.provider;
+      refreshChatModels();
+      if (chat.model) $('chatModel').value = chat.model;
+      refreshChatNotConfigured();
+    }
+    renderChatMessages(chat.messages || []);
+    loadChats();
+  } catch (err) {
+    showError($('chatError'), err.message);
+  }
+});
+
+$('newChatBtn').addEventListener('click', () => {
+  state.currentChatId = null;
+  renderChatMessages([]);
+  hideError($('chatError'));
+  loadChats();
+  $('chatInput').focus();
+});
+
+$('chatSendBtn').addEventListener('click', async () => {
+  const content = $('chatInput').value.trim();
+  const errEl = $('chatError');
+  hideError(errEl);
+  if (!content) { showError(errEl, '请先输入消息'); return; }
+  const provider = $('chatProvider').value;
+  const model = $('chatModel').value;
+
+  // 先把用户消息显示出来
+  const box = $('chatMessages');
+  if (box.querySelector('.muted')) box.innerHTML = '';
+  box.insertAdjacentHTML('beforeend', '<div class="msg user">' + esc(content) + '</div>');
+  box.insertAdjacentHTML('beforeend', '<div class="msg assistant" id="chatPending">思考中…</div>');
+  box.scrollTop = box.scrollHeight;
+
+  $('chatInput').value = '';
+  const btn = $('chatSendBtn');
+  btn.disabled = true;
+  try {
+    const data = await postJSON('/api/chat', {
+      provider, model,
+      chatId: state.currentChatId || '',
+      content,
+    });
+    state.currentChatId = data.chatId;
+    const pending = $('chatPending');
+    if (pending) pending.textContent = data.reply || '';
+    loadChats();
+  } catch (e) {
+    const pending = $('chatPending');
+    if (pending) pending.remove();
+    showError(errEl, e.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+/* ---------- 识图 ---------- */
+
+function refreshAnalyzeNotConfigured() {
+  const mode = document.querySelector('input[name="analyzeMode"]:checked').value;
+  setNotConfigured($('analyzeNotConfigured'), mode === 'ocr' ? 'siliconflow' : 'zhipu');
+  $('analyzeQuestionWrap').classList.toggle('hidden', mode === 'ocr');
+}
+
+document.querySelectorAll('input[name="analyzeMode"]').forEach(r => {
+  r.addEventListener('change', refreshAnalyzeNotConfigured);
+});
+
+$('analyzeFile').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  const errEl = $('analyzeError');
+  hideError(errEl);
+  state.analyzeImage = null;
+  $('analyzePreview').innerHTML = '';
+  if (!file) return;
+  if (file.size > 10 * 1024 * 1024) {
+    showError(errEl, '图片超过 10MB，请换一张小一点的图片');
+    e.target.value = '';
+    return;
+  }
+  try {
+    state.analyzeImage = await fileToBase64(file);
+    $('analyzePreview').innerHTML = '<img src="' + esc(URL.createObjectURL(file)) + '" alt="待识别图片">';
+  } catch (err) {
+    showError(errEl, err.message);
+  }
+});
+
+$('analyzeBtn').addEventListener('click', async () => {
+  const errEl = $('analyzeError');
+  const resultEl = $('analyzeResult');
+  hideError(errEl);
+  resultEl.classList.add('hidden');
+  if (!state.analyzeImage) { showError(errEl, '请先上传一张图片'); return; }
+  const mode = document.querySelector('input[name="analyzeMode"]:checked').value;
+  const question = $('analyzeQuestion').value.trim();
+  if (mode === 'ask' && !question) { showError(errEl, '请先输入提问'); return; }
+
+  const btn = $('analyzeBtn');
+  btn.disabled = true;
+  btn.textContent = '识别中…';
+  try {
+    const data = await postJSON('/api/analyze', {
+      provider: mode === 'ocr' ? 'siliconflow' : 'zhipu',
+      mode,
+      imageBase64: state.analyzeImage.base64,
+      mimeType: state.analyzeImage.mimeType,
+      question: mode === 'ask' ? question : undefined,
+    });
+    resultEl.textContent = data.text || '没有返回内容';
+    resultEl.classList.remove('hidden');
+  } catch (e) {
+    showError(errEl, e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '开始识别';
+  }
+});
+
+/* ---------- 翻译 ---------- */
+
+function refreshTranslateNotConfigured() {
+  setNotConfigured($('translateNotConfigured'), $('translateProvider').value);
+}
+
+$('translateProvider').addEventListener('change', refreshTranslateNotConfigured);
+
+$('translateBtn').addEventListener('click', async () => {
+  const text = $('translateInput').value.trim();
+  const errEl = $('translateError');
+  hideError(errEl);
+  if (!text) { showError(errEl, '请先输入原文'); return; }
+
+  const btn = $('translateBtn');
+  btn.disabled = true;
+  btn.textContent = '翻译中…';
+  try {
+    const data = await postJSON('/api/translate', {
+      provider: $('translateProvider').value,
+      text,
+      sourceLang: $('sourceLang').value || undefined,
+      targetLang: $('targetLang').value,
+    });
+    $('translateResult').textContent = data.text || '没有返回译文';
+  } catch (e) {
+    showError(errEl, e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '翻译';
+  }
+});
+
+/* ---------- 语音：TTS ---------- */
+
+function refreshTtsNotConfigured() {
+  setNotConfigured($('ttsNotConfigured'), $('ttsProvider').value);
+}
+
+$('ttsProvider').addEventListener('change', () => {
+  const isEleven = $('ttsProvider').value === 'elevenlabs';
+  $('ttsVoiceWrap').classList.toggle('hidden', !isEleven);
+  $('ttsLangWrap').classList.toggle('hidden', isEleven);
+  refreshTtsNotConfigured();
+});
+
+$('ttsBtn').addEventListener('click', async () => {
+  const text = $('ttsText').value.trim();
+  const errEl = $('ttsError');
+  hideError(errEl);
+  if (!text) { showError(errEl, '请先输入要朗读的文本'); return; }
+  const provider = $('ttsProvider').value;
+
+  const btn = $('ttsBtn');
+  btn.disabled = true;
+  btn.textContent = '生成中…';
+  try {
+    let res;
+    try {
+      res = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider, text,
+          voiceId: provider === 'elevenlabs' ? $('ttsVoice').value : undefined,
+          lang: provider === 'cloudflare' ? $('ttsLang').value : undefined,
+        }),
+      });
+    } catch (e) {
+      throw new Error('网络请求失败，请检查服务是否启动');
+    }
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const data = await res.json();
+      throw new Error((data && data.message) || '语音生成失败');
+    }
+    const blob = await res.blob();
+    if (!blob.size) throw new Error('语音生成失败：服务器返回了空音频');
+    const audio = $('ttsAudio');
+    audio.src = URL.createObjectURL(blob);
+    audio.classList.remove('hidden');
+    audio.play().catch(() => { /* 浏览器阻止自动播放时用户可手动点播放 */ });
+  } catch (e) {
+    showError(errEl, e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '生成语音';
+  }
+});
+
+/* ---------- 语音：STT ---------- */
+
+function refreshSttNotConfigured() {
+  setNotConfigured($('sttNotConfigured'), $('sttProvider').value);
+}
+
+$('sttProvider').addEventListener('change', refreshSttNotConfigured);
+
+$('sttFile').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  const errEl = $('sttError');
+  hideError(errEl);
+  state.sttAudio = null;
+  $('sttFileName').textContent = '';
+  if (!file) return;
+  try {
+    state.sttAudio = await fileToBase64(file);
+    $('sttFileName').textContent = '已选择：' + file.name;
+  } catch (err) {
+    showError(errEl, err.message);
+  }
+});
+
+/* 录音（MediaRecorder，浏览器不支持时禁用按钮） */
+let mediaRecorder = null;
+let recordChunks = [];
+const recordBtn = $('recordBtn');
+if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined') {
+  recordBtn.disabled = true;
+  $('recordStatus').textContent = '当前浏览器不支持录音，请改用上传音频文件。';
+}
+
+recordBtn.addEventListener('click', async () => {
+  const statusEl = $('recordStatus');
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recordChunks = [];
+    mediaRecorder = new MediaRecorder(stream);
+    mediaRecorder.ondataavailable = (ev) => { if (ev.data.size) recordChunks.push(ev.data); };
+    mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop());
+      recordBtn.textContent = '开始录音';
+      statusEl.textContent = '录音完成，正在处理…';
+      try {
+        const blob = new Blob(recordChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+        const file = new File([blob], 'recording.webm', { type: blob.type });
+        state.sttAudio = await fileToBase64(file);
+        $('sttFile').value = '';
+        $('sttFileName').textContent = '已录制一段音频';
+        statusEl.textContent = '录音完成，可点“识别语音”。';
+      } catch (err) {
+        statusEl.textContent = '';
+        showError($('sttError'), err.message);
+      }
+    };
+    mediaRecorder.start();
+    recordBtn.textContent = '停止录音';
+    statusEl.textContent = '正在录音…';
+  } catch (e) {
+    showError($('sttError'), '无法打开麦克风，请检查浏览器权限，或改用上传音频文件');
+  }
+});
+
+$('sttBtn').addEventListener('click', async () => {
+  const errEl = $('sttError');
+  const resultEl = $('sttResult');
+  hideError(errEl);
+  resultEl.classList.add('hidden');
+  if (!state.sttAudio) { showError(errEl, '请先上传音频文件或录一段音'); return; }
+
+  const btn = $('sttBtn');
+  btn.disabled = true;
+  btn.textContent = '识别中…';
+  try {
+    const data = await postJSON('/api/stt', {
+      provider: $('sttProvider').value,
+      audioBase64: state.sttAudio.base64,
+      mimeType: state.sttAudio.mimeType,
+    });
+    resultEl.textContent = data.text || '没有识别出文字';
+    resultEl.classList.remove('hidden');
+  } catch (e) {
+    showError(errEl, e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '识别语音';
+  }
+});
+
+/* ---------- 向量 ---------- */
+
+function refreshEmbedNotConfigured() {
+  setNotConfigured($('embedNotConfigured'), $('embedProvider').value);
+}
+
+$('embedProvider').addEventListener('change', refreshEmbedNotConfigured);
+
+$('embedBtn').addEventListener('click', async () => {
+  const text1 = $('embedText1').value.trim();
+  const text2 = $('embedText2').value.trim();
+  const errEl = $('embedError');
+  const resultEl = $('embedResult');
+  hideError(errEl);
+  resultEl.classList.add('hidden');
+  if (!text1 || !text2) { showError(errEl, '请把两段文本都填上'); return; }
+
+  const btn = $('embedBtn');
+  btn.disabled = true;
+  btn.textContent = '计算中…';
+  try {
+    const data = await postJSON('/api/embed', {
+      provider: $('embedProvider').value,
+      text1, text2,
+    });
+    const pct = (Number(data.similarity) * 100).toFixed(2);
+    resultEl.innerHTML = '相似度：<b>' + esc(pct) + '%</b><br>向量维度：' + esc(data.dimension);
+    resultEl.classList.remove('hidden');
+  } catch (e) {
+    showError(errEl, e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '计算相似度';
+  }
+});
+
+/* ---------- 设置：供应商配置 ---------- */
+
+/* 各供应商需要填写的字段（label 为中文说明） */
+const PROVIDER_FIELDS = {
+  zhipu: [{ key: 'apiKey', label: 'API Key', type: 'password' }],
+  groq: [{ key: 'apiKey', label: 'API Key', type: 'password' }],
+  cloudflare: [
+    { key: 'apiKey', label: 'API Token', type: 'password' },
+    { key: 'accountId', label: 'Account ID', type: 'text' },
+  ],
+  deepl: [{ key: 'apiKey', label: 'API Key', type: 'password' }],
+  elevenlabs: [{ key: 'apiKey', label: 'API Key', type: 'password' }],
+  siliconflow: [{ key: 'apiKey', label: 'API Key', type: 'password' }],
+  kaggle: [
+    { key: 'username', label: '用户名', type: 'text' },
+    { key: 'apiKey', label: 'API Key', type: 'password' },
+  ],
+  instabox: [{ key: 'proxyUrl', label: '代理地址', type: 'text', placeholder: '形如 https://3001-xxx.instabox.tech' }],
+};
+
+function renderSettingsForms(providers) {
+  const box = $('providerForms');
+  if (!providers.length) {
+    box.innerHTML = '<p class="muted">没有可配置的供应商。</p>';
+    return;
+  }
+  box.innerHTML = providers.map(p => {
+    const fields = PROVIDER_FIELDS[p.name] || [{ key: 'apiKey', label: 'API Key', type: 'password' }];
+    const inputs = fields.map(f =>
+      '<label class="field-label" for="pf-' + esc(p.name) + '-' + esc(f.key) + '">' + esc(f.label) + '</label>'
+      + '<input id="pf-' + esc(p.name) + '-' + esc(f.key) + '" type="' + esc(f.type) + '" data-provider="' + esc(p.name) + '" data-field="' + esc(f.key) + '" placeholder="' + esc(f.placeholder || '') + '" autocomplete="off">'
+    ).join('');
+    return '<div class="provider-form" data-provider-form="' + esc(p.name) + '">'
+      + '<h3>' + esc(p.label || PROVIDER_LABELS[p.name] || p.name) + ' '
+      + '<span class="' + (p.configured ? 'configured' : 'not-configured') + '">'
+      + (p.configured ? '已配置' : '未配置') + '</span></h3>'
+      + (p.quotaNote ? '<p class="quota">' + esc(p.quotaNote) + '</p>' : '')
+      + inputs
+      + '<button class="btn" data-save-provider="' + esc(p.name) + '">保存</button>'
+      + '<p class="error hidden" data-provider-error="' + esc(p.name) + '"></p>'
+      + '<p class="hint hidden" data-provider-ok="' + esc(p.name) + '">已保存。</p>'
+      + '</div>';
+  }).join('');
+}
+
+$('providerForms').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-save-provider]');
+  if (!btn) return;
+  const name = btn.dataset.saveProvider;
+  const errEl = document.querySelector('[data-provider-error="' + name + '"]');
+  const okEl = document.querySelector('[data-provider-ok="' + name + '"]');
+  hideError(errEl);
+  if (okEl) okEl.classList.add('hidden');
+
+  const body = {};
+  document.querySelectorAll('input[data-provider="' + name + '"]').forEach(input => {
+    const v = input.value.trim();
+    if (v) body[input.dataset.field] = v;
+  });
+  if (!Object.keys(body).length) {
+    showError(errEl, '请至少填写一项再保存');
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = '保存中…';
+  try {
+    await postJSON('/api/providers/' + encodeURIComponent(name), body);
+    if (okEl) okEl.classList.remove('hidden');
+    // 清空输入框，不回显密钥；刷新配置状态
+    document.querySelectorAll('input[data-provider="' + name + '"]').forEach(input => { input.value = ''; });
+    await loadProviders();
+    await loadStatus();
+  } catch (err) {
+    showError(errEl, err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '保存';
+  }
+});
+
+/* ---------- 设置：剩余用量 ---------- */
+
+function usageBar(used, limit) {
+  const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
+  return '<div class="bar"><div style="width:' + pct.toFixed(1) + '%"></div></div>';
+}
+
+async function loadUsage() {
+  const box = $('usageBox');
+  box.innerHTML = '<p class="muted">查询中…</p>';
+  try {
+    const u = await api('/api/usage');
+    const rows = [];
+    if (u.cloudflare) {
+      const c = u.cloudflare;
+      rows.push('<div class="usage-row">Cloudflare Workers AI（当日）<br>已用 <b>' + fmtNum(c.usedNeurons)
+        + '</b> / ' + fmtNum(c.limit) + ' Neurons' + (c.date ? '（' + esc(c.date) + '）' : '')
+        + usageBar(c.usedNeurons, c.limit) + '</div>');
+    }
+    if (u.kaggle) {
+      const k = u.kaggle;
+      const hours = (k.usedSeconds / 3600).toFixed(2);
+      rows.push('<div class="usage-row">Kaggle GPU（本周）<br>已用 <b>' + fmtNum(k.usedSeconds)
+        + '</b> / ' + fmtNum(k.limitSeconds) + ' 秒（约 ' + hours + ' 小时）'
+        + (k.jobs != null ? '，共 ' + k.jobs + ' 个任务' : '')
+        + usageBar(k.usedSeconds, k.limitSeconds) + '</div>');
+    }
+    if (u.elevenlabs) {
+      const e = u.elevenlabs;
+      rows.push('<div class="usage-row">ElevenLabs（本月）<br>已用 <b>' + fmtNum(e.character_count)
+        + '</b> / ' + fmtNum(e.character_limit) + ' 字符'
+        + usageBar(e.character_count, e.character_limit) + '</div>');
+    } else {
+      rows.push('<div class="usage-row">ElevenLabs：未配置或暂未查到用量</div>');
+    }
+    if (u.deepl) {
+      const d = u.deepl;
+      rows.push('<div class="usage-row">DeepL<br>已用 <b>' + fmtNum(d.character_count)
+        + '</b> / ' + fmtNum(d.character_limit) + ' 字符'
+        + usageBar(d.character_count, d.character_limit) + '</div>');
+    } else {
+      rows.push('<div class="usage-row">DeepL：未配置或暂未查到用量</div>');
+    }
+    box.innerHTML = rows.length ? rows.join('') : '<p class="muted">暂无用量数据。</p>';
+  } catch (e) {
+    box.innerHTML = '<p class="error">' + esc(e.message) + '</p>';
+  }
+}
+
+$('usageRefreshBtn').addEventListener('click', loadUsage);
+
+/* ---------- 初始化 ---------- */
+
+refreshChatModels();
+updateBackendNote();
+loadProviders();
+loadStatus();
+loadHistory();
+loadUsage();

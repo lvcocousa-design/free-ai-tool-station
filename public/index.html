@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>免费AI工具站</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="app-header">
+  <h1>免费AI工具站</h1>
+  <p class="subtitle">全部使用免费额度 · 无需付费</p>
+</header>
+
+<nav class="tabs" id="tabBar" aria-label="功能页签">
+  <button class="tab-btn active" data-tab="create">创作</button>
+  <button class="tab-btn" data-tab="chat">对话/代码</button>
+  <button class="tab-btn" data-tab="analyze">识图</button>
+  <button class="tab-btn" data-tab="translate">翻译</button>
+  <button class="tab-btn" data-tab="voice">语音</button>
+  <button class="tab-btn" data-tab="music">音乐</button>
+  <button class="tab-btn" data-tab="embed">向量</button>
+  <button class="tab-btn" data-tab="settings">设置</button>
+</nav>
+
+<main>
+  <!-- ============ 创作 ============ -->
+  <section class="tab-panel active" id="panel-create">
+    <div id="createStatus" class="status-line">正在检查后端状态…</div>
+
+    <div class="mode-switch" role="tablist" aria-label="创作模式">
+      <button class="mode-btn active" id="modeImageBtn" data-mode="image">出图</button>
+      <button class="mode-btn" id="modeVideoBtn" data-mode="video">生视频</button>
+    </div>
+
+    <!-- 出图 -->
+    <div id="imageMode" class="card">
+      <label class="field-label" for="genPrompt">提示词</label>
+      <textarea id="genPrompt" rows="4" placeholder="描述你想要的画面，例如：一只荷兰兔坐在草地上，阳光明媚，写实风格"></textarea>
+
+      <fieldset class="field-group">
+        <legend>尺寸</legend>
+        <label class="radio"><input type="radio" name="genSize" value="square" checked> 方形 1024×1024</label>
+        <label class="radio"><input type="radio" name="genSize" value="portrait"> 竖图 512×768</label>
+        <p class="hint" id="sizeHint">Kaggle / Cloudflare 后端固定出 1024×1024，尺寸选择仅对 InstaBox 生效。</p>
+      </fieldset>
+
+      <fieldset class="field-group">
+        <legend>后端</legend>
+        <label class="radio"><input type="radio" name="genBackend" value="instabox"> <span id="backendLabel-instabox">InstaBox CPU</span></label>
+        <label class="radio"><input type="radio" name="genBackend" value="kaggle"> <span id="backendLabel-kaggle">Kaggle GPU</span></label>
+        <label class="radio"><input type="radio" name="genBackend" value="cloudflare" checked> <span id="backendLabel-cloudflare">Cloudflare</span></label>
+        <p class="hint" id="backendNote"></p>
+      </fieldset>
+
+      <div id="genNotConfigured" class="notice hidden"></div>
+      <button class="btn primary btn-block" id="genBtn">生成图片</button>
+      <p class="error hidden" id="genError"></p>
+    </div>
+
+    <!-- 生视频 -->
+    <div id="videoMode" class="card hidden">
+      <p class="hint">视频走 Kaggle Wan 2.2 图生视频（720p、5 秒），一次约 1 小时，耗用每周 30 小时 GPU 额度。</p>
+      <label class="field-label">首帧（从历史图片里选一张）</label>
+      <div id="framePicker" class="frame-picker"><p class="muted">暂无历史图片，请先去出图。</p></div>
+      <label class="field-label" for="videoPrompt">动作描述</label>
+      <textarea id="videoPrompt" rows="3" placeholder="例如：兔子慢慢抬起头，看向镜头，耳朵轻轻动一下"></textarea>
+      <div id="videoNotConfigured" class="notice hidden"></div>
+      <button class="btn primary btn-block" id="videoBtn">生成视频</button>
+      <p class="error hidden" id="videoError"></p>
+    </div>
+
+    <!-- 输出框 -->
+    <div class="card" id="outputCard">
+      <h2>输出</h2>
+      <div id="outputStatus" class="output-status muted">还没有生成内容。</div>
+      <div id="outputMedia" class="output-media"></div>
+      <p class="error hidden" id="outputError"></p>
+    </div>
+
+    <!-- 历史 -->
+    <div class="card">
+      <div class="card-head">
+        <h2>历史</h2>
+        <button class="btn small" id="historyRefreshBtn">刷新</button>
+      </div>
+      <div id="historyList" class="history-list"><p class="muted">加载中…</p></div>
+    </div>
+  </section>
+
+  <!-- ============ 对话/代码 ============ -->
+  <section class="tab-panel" id="panel-chat">
+    <div class="card">
+      <div class="row">
+        <div class="flex-1">
+          <label class="field-label" for="chatProvider">供应商</label>
+          <select id="chatProvider">
+            <option value="zhipu">智谱 z.ai</option>
+            <option value="groq">Groq</option>
+            <option value="cloudflare">Cloudflare</option>
+          </select>
+        </div>
+        <div class="flex-1">
+          <label class="field-label" for="chatModel">模型</label>
+          <select id="chatModel"></select>
+        </div>
+      </div>
+      <div id="chatNotConfigured" class="notice hidden"></div>
+      <div class="row">
+        <button class="btn" id="newChatBtn">＋ 新会话</button>
+      </div>
+    </div>
+
+    <div class="chat-layout">
+      <div class="card chat-list-card">
+        <h2>会话</h2>
+        <div id="chatList" class="chat-list"><p class="muted">加载中…</p></div>
+      </div>
+      <div class="card chat-main-card">
+        <div id="chatMessages" class="chat-messages"><p class="muted">选择一个会话，或直接发消息开始新会话。</p></div>
+        <div class="chat-input-row">
+          <textarea id="chatInput" rows="3" placeholder="输入消息，支持问答、写代码、改代码…"></textarea>
+          <button class="btn primary" id="chatSendBtn">发送</button>
+        </div>
+        <p class="error hidden" id="chatError"></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 识图 ============ -->
+  <section class="tab-panel" id="panel-analyze">
+    <div class="card">
+      <fieldset class="field-group">
+        <legend>模式</legend>
+        <label class="radio"><input type="radio" name="analyzeMode" value="ask" checked> 提问（z.ai 识图问答）</label>
+        <label class="radio"><input type="radio" name="analyzeMode" value="ocr"> OCR 提取文字（硅基流动）</label>
+      </fieldset>
+      <div id="analyzeNotConfigured" class="notice hidden"></div>
+
+      <label class="field-label" for="analyzeFile">上传图片（10MB 以内）</label>
+      <input type="file" id="analyzeFile" accept="image/*">
+      <div id="analyzePreview" class="preview"></div>
+
+      <div id="analyzeQuestionWrap">
+        <label class="field-label" for="analyzeQuestion">提问</label>
+        <textarea id="analyzeQuestion" rows="3" placeholder="例如：这张图里有什么？"></textarea>
+      </div>
+
+      <button class="btn primary btn-block" id="analyzeBtn">开始识别</button>
+      <p class="error hidden" id="analyzeError"></p>
+      <div id="analyzeResult" class="result-box hidden"></div>
+    </div>
+  </section>
+
+  <!-- ============ 翻译 ============ -->
+  <section class="tab-panel" id="panel-translate">
+    <div class="card">
+      <div class="row">
+        <div class="flex-1">
+          <label class="field-label" for="translateProvider">供应商</label>
+          <select id="translateProvider">
+            <option value="deepl">DeepL</option>
+            <option value="cloudflare">Cloudflare</option>
+            <option value="siliconflow">硅基流动</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div class="flex-1">
+          <label class="field-label" for="sourceLang">源语言</label>
+          <select id="sourceLang">
+            <option value="">自动检测</option>
+            <option value="ZH">中文</option>
+            <option value="EN">英语</option>
+            <option value="JA">日语</option>
+            <option value="KO">韩语</option>
+            <option value="FR">法语</option>
+            <option value="DE">德语</option>
+            <option value="ES">西班牙语</option>
+            <option value="RU">俄语</option>
+          </select>
+        </div>
+        <div class="flex-1">
+          <label class="field-label" for="targetLang">目标语言</label>
+          <select id="targetLang">
+            <option value="EN-US">英语</option>
+            <option value="ZH">中文</option>
+            <option value="JA">日语</option>
+            <option value="KO">韩语</option>
+            <option value="FR">法语</option>
+            <option value="DE">德语</option>
+            <option value="ES">西班牙语</option>
+            <option value="RU">俄语</option>
+          </select>
+        </div>
+      </div>
+      <div id="translateNotConfigured" class="notice hidden"></div>
+
+      <label class="field-label" for="translateInput">原文</label>
+      <textarea id="translateInput" rows="5" placeholder="输入要翻译的文字"></textarea>
+      <button class="btn primary btn-block" id="translateBtn">翻译</button>
+      <p class="error hidden" id="translateError"></p>
+      <label class="field-label" for="translateResult">译文</label>
+      <div id="translateResult" class="result-box">译文将显示在这里。</div>
+    </div>
+  </section>
+
+  <!-- ============ 语音 ============ -->
+  <section class="tab-panel" id="panel-voice">
+    <div class="card">
+      <h2>文字转语音（TTS）</h2>
+      <div class="row">
+        <div class="flex-1">
+          <label class="field-label" for="ttsProvider">供应商</label>
+          <select id="ttsProvider">
+            <option value="elevenlabs">ElevenLabs</option>
+            <option value="cloudflare">Cloudflare</option>
+          </select>
+        </div>
+        <div class="flex-1" id="ttsVoiceWrap">
+          <label class="field-label" for="ttsVoice">音色</label>
+          <select id="ttsVoice">
+            <option value="EXAVITQu4vr4xnSDxMaL">Sarah（默认）</option>
+            <option value="Xb7hH8MSUJpSbSDYk0k2">Alice</option>
+            <option value="pNInz6obpgDQGcFmaJgB">Adam</option>
+            <option value="hpp4J3VqNfWAUOO0d1Us">Bella</option>
+            <option value="JBFqnCBsd6RMkjVDRZzb">George</option>
+          </select>
+          <p class="hint">免费账号仅可使用 premade 音色。</p>
+        </div>
+        <div class="flex-1 hidden" id="ttsLangWrap">
+          <label class="field-label" for="ttsLang">语言</label>
+          <select id="ttsLang">
+            <option value="en">英语</option>
+            <option value="zh">中文</option>
+          </select>
+        </div>
+      </div>
+      <div id="ttsNotConfigured" class="notice hidden"></div>
+      <label class="field-label" for="ttsText">文本</label>
+      <textarea id="ttsText" rows="4" placeholder="输入要朗读的文字"></textarea>
+      <button class="btn primary btn-block" id="ttsBtn">生成语音</button>
+      <p class="error hidden" id="ttsError"></p>
+      <audio id="ttsAudio" class="hidden" controls></audio>
+    </div>
+
+    <div class="card">
+      <h2>语音转文字（STT）</h2>
+      <label class="field-label" for="sttProvider">供应商</label>
+      <select id="sttProvider">
+        <option value="groq">Groq</option>
+        <option value="cloudflare">Cloudflare</option>
+        <option value="siliconflow">硅基流动</option>
+      </select>
+      <div id="sttNotConfigured" class="notice hidden"></div>
+
+      <label class="field-label" for="sttFile">上传音频文件</label>
+      <input type="file" id="sttFile" accept="audio/*">
+      <p class="hint" id="sttFileName"></p>
+
+      <div class="row">
+        <button class="btn" id="recordBtn">开始录音</button>
+        <span id="recordStatus" class="muted"></span>
+      </div>
+
+      <button class="btn primary btn-block" id="sttBtn">识别语音</button>
+      <p class="error hidden" id="sttError"></p>
+      <div id="sttResult" class="result-box hidden"></div>
+    </div>
+  </section>
+
+  <!-- ============ 音乐 ============ -->
+  <section class="tab-panel" id="panel-music">
+    <div class="card">
+      <h2>音乐</h2>
+      <p class="notice">ElevenLabs 音乐 API 需要付费计划，免费账号无法使用。</p>
+      <p class="muted">本站只使用免费额度，因此不提供音乐生成功能。</p>
+    </div>
+  </section>
+
+  <!-- ============ 向量 ============ -->
+  <section class="tab-panel" id="panel-embed">
+    <div class="card">
+      <label class="field-label" for="embedProvider">供应商</label>
+      <select id="embedProvider">
+        <option value="cloudflare">Cloudflare（bge-m3）</option>
+        <option value="siliconflow">硅基流动（bge-m3）</option>
+      </select>
+      <div id="embedNotConfigured" class="notice hidden"></div>
+
+      <label class="field-label" for="embedText1">文本一</label>
+      <textarea id="embedText1" rows="3" placeholder="输入第一段文本"></textarea>
+      <label class="field-label" for="embedText2">文本二</label>
+      <textarea id="embedText2" rows="3" placeholder="输入第二段文本"></textarea>
+      <button class="btn primary btn-block" id="embedBtn">计算相似度</button>
+      <p class="error hidden" id="embedError"></p>
+      <div id="embedResult" class="result-box hidden"></div>
+    </div>
+  </section>
+
+  <!-- ============ 设置 ============ -->
+  <section class="tab-panel" id="panel-settings">
+    <div class="card">
+      <h2>供应商配置</h2>
+      <p class="hint">密钥只保存在服务器本地，不会回显。保存后仅显示“已配置 / 未配置”。</p>
+      <div id="providerForms"><p class="muted">加载中…</p></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2>剩余用量</h2>
+        <button class="btn small" id="usageRefreshBtn">刷新</button>
+      </div>
+      <div id="usageBox"><p class="muted">加载中…</p></div>
+    </div>
+  </section>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
