@@ -1,0 +1,201 @@
+{
+  "chat": {
+    "cloudflare": {
+      "default": "@cf/meta/llama-3.1-8b-instruct-fp8",
+      "models": [
+        {
+          "id": "@cf/meta/llama-3.1-8b-instruct-fp8",
+          "label": "Llama-3.1-8B-Instruct"
+        }
+      ]
+    },
+    "gemini": {
+      "default": "gemini-3.8-flash",
+      "models": [
+        {
+          "id": "gemini-3.8-flash",
+          "label": "Gemini 3.8 Flash"
+        },
+        {
+          "id": "gemini-3.5-flash-lite",
+          "label": "Gemini 3.5 Flash-Lite"
+        }
+      ]
+    },
+    "groq": {
+      "default": "openai/gpt-oss-120b",
+      "models": [
+        {
+          "id": "openai/gpt-oss-120b",
+          "label": "gpt-oss-120b"
+        },
+        {
+          "id": "openai/gpt-oss-20b",
+          "label": "gpt-oss-20b"
+        },
+        {
+          "id": "qwen/qwen3.8-27b",
+          "label": "Qwen3 8-27b"
+        }
+      ]
+    },
+    "zhipu": {
+      "default": "glm-4.7-flash",
+      "models": [
+        {
+          "id": "glm-4.7-flash",
+          "label": "GLM-4.7-Flash"
+        },
+        {
+          "id": "glm-4.5-flash",
+          "label": "GLM-4.5-Flash"
+        }
+      ]
+    }
+  },
+  "embed": {
+    "cloudflare": {
+      "default": "@cf/baai/bge-m3",
+      "models": [
+        {
+          "id": "@cf/baai/bge-m3",
+          "label": "bge-m3"
+        }
+      ]
+    },
+    "siliconflow": {
+      "default": "BAAI/bge-m3",
+      "models": [
+        {
+          "id": "BAAI/bge-m3",
+          "label": "bge-m3"
+        }
+      ]
+    }
+  },
+  "image": {
+    "cloudflare": {
+      "default": "@cf/black-forest-labs/flux-1-schnell",
+      "models": [
+        {
+          "id": "@cf/black-forest-labs/flux-1-schnell",
+          "label": "FLUX.1 schnell"
+        }
+      ]
+    }
+  },
+  "stt": {
+    "cloudflare": {
+      "default": "@cf/openai/whisper-large-v3-turbo",
+      "models": [
+        {
+          "id": "@cf/openai/whisper-large-v3-turbo",
+          "label": "Whisper large v3 turbo"
+        }
+      ]
+    },
+    "groq": {
+      "default": "whisper-large-v3-turbo",
+      "models": [
+        {
+          "id": "whisper-large-v3-turbo",
+          "label": "Whisper large v3 turbo"
+        }
+      ]
+    },
+    "siliconflow": {
+      "default": "FunAudioLLM/SenseVoiceSmall",
+      "models": [
+        {
+          "id": "FunAudioLLM/SenseVoiceSmall",
+          "label": "SenseVoiceSmall"
+        }
+      ]
+    }
+  },
+  "translate": {
+    "cloudflare": {
+      "default": "@cf/meta/m2m100-1.2b",
+      "models": [
+        {
+          "id": "@cf/meta/m2m100-1.2b",
+          "label": "m2m100-1.2b"
+        }
+      ]
+    },
+    "siliconflow": {
+      "default": "tencent/Hunyuan-MT-7B",
+      "models": [
+        {
+          "id": "tencent/Hunyuan-MT-7B",
+          "label": "Hunyuan-MT-7B"
+        }
+      ]
+    }
+  },
+  "tts": {
+    "cloudflare": {
+      "default": "@cf/myshell-ai/melotts",
+      "models": [
+        {
+          "id": "@cf/myshell-ai/melotts",
+          "label": "MeloTTS"
+        }
+      ]
+    },
+    "elevenlabs": {
+      "default": "EXAVITQu4vr4xnSDxMaL",
+      "voices": [
+        {
+          "id": "EXAVITQu4vr4xnSDxMaL",
+          "label": "Sarah"
+        },
+        {
+          "id": "Xb7hH8MSUJpSbSDYk0k2",
+          "label": "Alice"
+        },
+        {
+          "id": "pNInz6obpgDQGcFmaJgB",
+          "label": "Adam"
+        },
+        {
+          "id": "hpp4J3VqNfWAUOO0d1Us",
+          "label": "Bella"
+        },
+        {
+          "id": "JBFqnCBsd6RMkjVDRZzb",
+          "label": "George"
+        }
+      ]
+    }
+  },
+  "vision": {
+    "gemini": {
+      "default": "gemini-3.8-flash",
+      "models": [
+        {
+          "id": "gemini-3.8-flash",
+          "label": "Gemini 3.8 Flash"
+        }
+      ]
+    },
+    "siliconflow": {
+      "default": "PaddlePaddle/PaddleOCR-VL-1.5",
+      "models": [
+        {
+          "id": "PaddlePaddle/PaddleOCR-VL-1.5",
+          "label": "PaddleOCR-VL-1.5"
+        }
+      ]
+    },
+    "zhipu": {
+      "default": "glm-4.6v-flash",
+      "models": [
+        {
+          "id": "glm-4.6v-flash",
+          "label": "GLM-4.6V-Flash"
+        }
+      ]
+    }
+  }
+}
