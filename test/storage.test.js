@@ -140,3 +140,26 @@ test('getBackendName：默认 local，STORAGE_BACKEND=local 时也是 local', { 
   const second = freshStorage(t, { backend: 'local' });
   assert.equal(await second.storage.getBackendName(), 'local');
 });
+
+test('getStorageBytes：空目录为 0，已知大小文件求和（含 blobs 子目录）', async (t) => {
+  const { storage, dir } = freshStorage(t);
+  assert.equal(await storage.getStorageBytes(), 0);
+  // 注意：首次调用后结果缓存 10 分钟，所以下面用新实例再测。
+  const second = freshStorage(t);
+  fs.writeFileSync(path.join(second.dir, 'a.json'), Buffer.alloc(100));
+  fs.mkdirSync(path.join(second.dir, 'blobs'), { recursive: true });
+  fs.writeFileSync(path.join(second.dir, 'blobs', 'img1.png'), Buffer.alloc(1024));
+  fs.writeFileSync(path.join(second.dir, 'blobs', 'vid1.mp4'), Buffer.alloc(2048));
+  fs.mkdirSync(path.join(second.dir, 'nested'), { recursive: true });
+  fs.writeFileSync(path.join(second.dir, 'nested', 'deep.txt'), Buffer.alloc(7));
+  assert.equal(await second.storage.getStorageBytes(), 100 + 1024 + 2048 + 7);
+});
+
+test('getStorageBytes：10 分钟内缓存，新增文件不立即反映', async (t) => {
+  const { storage, dir } = freshStorage(t);
+  fs.writeFileSync(path.join(dir, 'a.json'), Buffer.alloc(100));
+  assert.equal(await storage.getStorageBytes(), 100);
+  fs.writeFileSync(path.join(dir, 'b.json'), Buffer.alloc(900));
+  // 缓存期内仍返回旧值（S3 的 ListObjects 是计费操作，不能每请求都列）。
+  assert.equal(await storage.getStorageBytes(), 100);
+});

@@ -12,10 +12,14 @@ const fs = require('fs');
 const net = require('net');
 const { spawn } = require('child_process');
 const path = require('path');
-const { PROJECT_ROOT, makeTempDir, rmDir } = require('./helpers');
+const { PROJECT_ROOT, makeTempDir, rmDir, todayUTC, mondayUTC } = require('./helpers');
 
 const SERVER_JS = path.join(PROJECT_ROOT, 'server.js');
 const START_TIMEOUT_MS = 20000;
+
+function currentMonthUTC() {
+  return new Date().toISOString().slice(0, 7);
+}
 
 // 假 Key（仅供测试断言“导出不含凭据”用，不是真实凭据）。
 const FAKE_GROQ_KEY = 'test-key-123';
@@ -29,9 +33,15 @@ const SEED_HISTORY = [
 const SEED_CHATS = [
   { id: 'chat-1', provider: 'groq', model: 'gpt-oss-120b', title: '你好', messages: [{ role: 'user', content: '你好', ts: 1 }], createdAt: 1, updatedAt: 2 },
 ];
+// 注意：种子用量里的日期必须用当天/本周/当月动态值——服务端在处理
+// /api/backup/export 之前会先跑请求计数中间件，它调 usage.load()，
+// load() 会把过期日期的用量清零并写回文件（硬编码过去日期会导致
+// 导出内容与种子不一致）。groq/requests 是用量上限功能新增的字段。
 const SEED_USAGE = {
-  cloudflare: { date: '2026-11-19', usedNeurons: 120, byModel: { 'flux-1-schnell': 120 } },
-  kaggle: { weekStart: '2026-11-16', usedSeconds: 3600, jobs: 2 },
+  cloudflare: { date: todayUTC(), usedNeurons: 120, byModel: { 'flux-1-schnell': 120 } },
+  kaggle: { weekStart: mondayUTC(), usedSeconds: 3600, jobs: 2 },
+  groq: { date: todayUTC(), byModel: { 'gpt-oss-120b': { tokens: 500, requests: 3 } } },
+  requests: { month: currentMonthUTC(), count: 42 },
   elevenlabs: { characterCount: 100, characterLimit: 10000, updatedAt: '2026-11-19T00:00:00.000Z' },
   deepl: null,
 };
@@ -300,6 +310,8 @@ test('usage 非法数值被清洗，未知键被丢弃', async () => {
     usage: {
       cloudflare: { date: '2026-11-19', usedNeurons: 'abc', byModel: { 'flux-1-schnell': 'xx', good: 50 } },
       kaggle: { weekStart: '2026-11-16', usedSeconds: null, jobs: 'nope' },
+      groq: { date: '2026-11-19', byModel: { 'gpt-oss-120b': { tokens: 'bad', requests: 3 }, broken: 'nope' } },
+      requests: { month: '2026-10', count: 'many' },
       elevenlabs: { characterCount: 'bad', characterLimit: 10000, updatedAt: '2026-11-19T00:00:00.000Z' },
       deepl: 'not-an-object',
       unknownKey: { x: 1 },
@@ -314,9 +326,14 @@ test('usage 非法数值被清洗，未知键被丢弃', async () => {
   assert.equal(usage.cloudflare.byModel.good, 50);
   assert.equal(usage.kaggle.usedSeconds, 0);
   assert.equal(usage.kaggle.jobs, 0);
+  assert.deepEqual(usage.groq.byModel['gpt-oss-120b'], { tokens: 0, requests: 3 });
+  assert.ok(!('broken' in usage.groq.byModel));
+  assert.equal(usage.requests.count, 0);
+  assert.equal(usage.requests.month, '2026-10');
   assert.equal(usage.elevenlabs.characterCount, 0);
   assert.equal(usage.elevenlabs.characterLimit, 10000);
   assert.equal(usage.deepl, null);
   assert.ok(!('unknownKey' in usage));
-  assert.deepEqual(Object.keys(usage).sort(), ['cloudflare', 'deepl', 'elevenlabs', 'kaggle']);
+  assert.deepEqual(Object.keys(usage).sort(),
+    ['cloudflare', 'deepl', 'elevenlabs', 'groq', 'kaggle', 'requests']);
 });
