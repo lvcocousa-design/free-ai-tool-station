@@ -1105,6 +1105,7 @@ function renderSettingsForms(providers) {
       + (p.quotaNote ? '<p class="quota">' + esc(p.quotaNote) + '</p>' : '')
       + inputs
       + '<button class="btn" data-save-provider="' + esc(p.name) + '">保存</button>'
+      + ' <button class="btn" data-test-provider="' + esc(p.name) + '">测试连接</button>'
       + '<p class="error hidden" data-provider-error="' + esc(p.name) + '"></p>'
       + '<p class="hint hidden" data-provider-ok="' + esc(p.name) + '">已保存。</p>'
       + '</div>';
@@ -1112,9 +1113,12 @@ function renderSettingsForms(providers) {
 }
 
 $('providerForms').addEventListener('click', async (e) => {
-  const btn = e.target.closest('[data-save-provider]');
-  if (!btn) return;
-  const name = btn.dataset.saveProvider;
+  const saveBtn = e.target.closest('[data-save-provider]');
+  const testBtn = e.target.closest('[data-test-provider]');
+  if (!saveBtn && !testBtn) return;
+  const btn = saveBtn || testBtn;
+  const isTest = Boolean(testBtn);
+  const name = isTest ? testBtn.dataset.testProvider : saveBtn.dataset.saveProvider;
   const errEl = document.querySelector('[data-provider-error="' + name + '"]');
   const okEl = document.querySelector('[data-provider-ok="' + name + '"]');
   hideError(errEl);
@@ -1125,24 +1129,36 @@ $('providerForms').addEventListener('click', async (e) => {
     const v = input.value.trim();
     if (v) body[input.dataset.field] = v;
   });
-  if (!Object.keys(body).length) {
+  if (!isTest && !Object.keys(body).length) {
     showError(errEl, '请至少填写一项再保存');
     return;
   }
   btn.disabled = true;
-  btn.textContent = '保存中…';
+  btn.textContent = isTest ? '测试中…' : '保存中…';
   try {
-    await postJSON('/api/providers/' + encodeURIComponent(name), body);
-    if (okEl) okEl.classList.remove('hidden');
-    // 清空输入框，不回显密钥；刷新配置状态
-    document.querySelectorAll('input[data-provider="' + name + '"]').forEach(input => { input.value = ''; });
-    await loadProviders();
-    await loadStatus();
+    if (isTest) {
+      // 只测不存：空输入时服务端用已保存的凭据测，填了新值则用新值测。
+      await postJSON('/api/providers/' + encodeURIComponent(name) + '/test', body);
+      if (okEl) {
+        okEl.textContent = '连接成功。';
+        okEl.classList.remove('hidden');
+      }
+    } else {
+      await postJSON('/api/providers/' + encodeURIComponent(name), body);
+      if (okEl) {
+        okEl.textContent = '已保存。';
+        okEl.classList.remove('hidden');
+      }
+      // 清空输入框，不回显密钥；刷新配置状态
+      document.querySelectorAll('input[data-provider="' + name + '"]').forEach(input => { input.value = ''; });
+      await loadProviders();
+      await loadStatus();
+    }
   } catch (err) {
     showError(errEl, err.message);
   } finally {
     btn.disabled = false;
-    btn.textContent = '保存';
+    btn.textContent = isTest ? '测试连接' : '保存';
   }
 });
 
@@ -1427,9 +1443,13 @@ $('backupFileInput').addEventListener('change', async () => {
 
 /* ---------- 访问密码保护 ---------- */
 
+/* 本次登录是否需要动态码（由 initAuth 从 /api/auth/status 取回）。 */
+let loginNeedsTotp = false;
+
 function showLoginOverlay() {
   $('loginOverlay').classList.remove('hidden');
   document.body.classList.add('login-open');
+  $('totpField').classList.toggle('hidden', !loginNeedsTotp);
   const input = $('loginPassword');
   if (input) input.focus();
 }
@@ -1441,16 +1461,24 @@ function hideLoginOverlay() {
 
 async function submitLogin() {
   const input = $('loginPassword');
+  const totpInput = $('loginTotp');
   const errEl = $('loginError');
   const btn = $('loginBtn');
   hideError(errEl);
   const password = input.value;
   if (!password) { showError(errEl, '请输入访问密码'); return; }
+  const body = { password };
+  if (loginNeedsTotp) {
+    const totpCode = totpInput.value.trim();
+    if (!totpCode) { showError(errEl, '请输入动态码'); return; }
+    body.totpCode = totpCode;
+  }
   btn.disabled = true;
   btn.textContent = '登录中…';
   try {
-    await postJSON('/api/login', { password });
+    await postJSON('/api/login', body);
     input.value = '';
+    totpInput.value = '';
     hideLoginOverlay();
     initApp();
   } catch (e) {
@@ -1465,6 +1493,135 @@ $('loginBtn').addEventListener('click', submitLogin);
 $('loginPassword').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') submitLogin();
 });
+$('loginTotp').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') submitLogin();
+});
+
+/* ---------- 二次验证（TOTP）设置 ---------- */
+
+/* 发 POST 但不走 api() 的 401 跳登录逻辑：确认/关闭接口的 401 只是
+   “动态码或密码不对”，不是会话过期；只有服务端说“未登录”时才跳登录。 */
+async function postJSONPlain(path, body) {
+  let res;
+  try {
+    res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    throw new Error('网络请求失败，请检查服务是否启动');
+  }
+  const data = await res.json().catch(() => null);
+  if (res.status === 401 && data && data.message === '未登录，请先登录') {
+    showLoginOverlay();
+    throw new Error('登录已过期，请重新登录');
+  }
+  if (!res.ok || (data && data.ok === false)) {
+    throw new Error((data && data.message) || ('请求失败（HTTP ' + res.status + '）'));
+  }
+  return data;
+}
+
+function showHint(el, msg) {
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+function hideHint(el) { if (el) el.classList.add('hidden'); }
+
+/* 待确认的密钥（setup 返回后存在内存里，confirm 时传回服务端）。 */
+let pendingTotpSecret = '';
+
+async function loadTotpStatus() {
+  const box = $('totpStatus');
+  const errEl = $('totpError');
+  const okEl = $('totpOk');
+  hideError(errEl);
+  hideHint(okEl);
+  try {
+    const s = await api('/api/totp/status');
+    if (!s.authEnabled) {
+      box.innerHTML = '<p class="muted">未设置访问密码，无法开启二次验证。请先在部署环境里设置 ACCESS_PASSWORD。</p>';
+      return;
+    }
+    if (s.totpEnabled) {
+      box.innerHTML = '<p>已开启（剩余备用码 ' + s.backupCodesRemaining + ' 个）</p>'
+        + '<button class="btn" id="totpDisableBtn">关闭二次验证</button>';
+      $('totpDisableBtn').addEventListener('click', () => {
+        hideError(errEl);
+        hideHint(okEl);
+        $('totpDisable').classList.remove('hidden');
+        $('totpDisablePassword').focus();
+      });
+    } else {
+      box.innerHTML = '<p class="muted">未开启</p>'
+        + '<button class="btn primary" id="totpEnableBtn">开启二次验证</button>';
+      $('totpEnableBtn').addEventListener('click', startTotpSetup);
+    }
+  } catch (e) {
+    box.innerHTML = '<p class="muted">状态加载失败</p>';
+    showError(errEl, e.message);
+  }
+}
+
+async function startTotpSetup() {
+  const errEl = $('totpError');
+  const okEl = $('totpOk');
+  hideError(errEl);
+  hideHint(okEl);
+  try {
+    const data = await api('/api/totp/setup', { method: 'POST' });
+    pendingTotpSecret = data.secret;
+    // 密钥按 4 位分组展示，好抄。
+    $('totpSecretText').textContent = data.secret.replace(/(.{4})/g, '$1 ').trim();
+    $('totpUrlText').textContent = data.otpauthUrl;
+    $('totpSetup').classList.remove('hidden');
+    $('totpConfirmCode').value = '';
+    $('totpConfirmCode').focus();
+  } catch (e) {
+    showError(errEl, e.message);
+  }
+}
+
+$('totpConfirmBtn').addEventListener('click', async () => {
+  const errEl = $('totpSetupError');
+  const okEl = $('totpOk');
+  hideError(errEl);
+  hideHint(okEl);
+  const code = $('totpConfirmCode').value.trim();
+  if (!code) { showError(errEl, '请输入动态码'); return; }
+  try {
+    const data = await postJSONPlain('/api/totp/confirm', { secret: pendingTotpSecret, code });
+    pendingTotpSecret = '';
+    $('totpSetup').classList.add('hidden');
+    $('totpBackupCodesText').textContent = data.backupCodes.join('\n');
+    $('totpBackupCodes').classList.remove('hidden');
+    showHint(okEl, '二次验证已开启。下次登录需要输入动态码。');
+    loadTotpStatus();
+  } catch (e) {
+    showError(errEl, e.message);
+  }
+});
+
+$('totpDisableConfirmBtn').addEventListener('click', async () => {
+  const errEl = $('totpError');
+  const okEl = $('totpOk');
+  hideError(errEl);
+  hideHint(okEl);
+  const password = $('totpDisablePassword').value;
+  if (!password) { showError(errEl, '请输入访问密码'); return; }
+  try {
+    await postJSONPlain('/api/totp/disable', { password });
+    $('totpDisablePassword').value = '';
+    $('totpDisable').classList.add('hidden');
+    $('totpBackupCodes').classList.add('hidden');
+    showHint(okEl, '二次验证已关闭。');
+    loadTotpStatus();
+  } catch (e) {
+    showError(errEl, e.message);
+  }
+});
 
 /* ---------- 初始化 ---------- */
 
@@ -1477,6 +1634,7 @@ function initApp() {
   loadStatus();
   loadHistory();
   loadUsage();
+  loadTotpStatus();
 }
 
 /* 先查登录状态：需要登录且未登录时只显示登录遮罩，不发起数据请求；
@@ -1486,6 +1644,7 @@ async function initAuth() {
   try {
     s = await api('/api/auth/status');
   } catch (e) { /* 状态接口不通，按不设防处理 */ }
+  loginNeedsTotp = s.totpEnabled === true;
   if (s.authRequired && !s.authenticated) {
     showLoginOverlay();
     return;

@@ -459,6 +459,20 @@ input[type="file"]:hover { border-color: var(--primary); }
   min-height: 48px;
 }
 
+/* 等宽文本框：TOTP 密钥、otpauth 链接、备用码展示用 */
+.mono-box {
+  background: var(--result-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  margin: 8px 0 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 14px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.mono-box.small { font-size: 12px; }
+
 /* ---------- 创作 ---------- */
 
 .status-line {

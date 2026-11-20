@@ -372,6 +372,33 @@
       <p class="error hidden" id="backupError"></p>
       <p class="hint hidden" id="backupOk"></p>
     </div>
+
+    <div class="card">
+      <h2>二次验证（TOTP）</h2>
+      <p class="hint">开启后登录除密码外还要输验证器 App 里的 6 位动态码，密码泄露也进不来。需要先设置访问密码。</p>
+      <div id="totpStatus"><p class="muted">加载中…</p></div>
+      <div id="totpSetup" class="hidden">
+        <p class="hint">在验证器 App（Google Authenticator、微软 Authenticator、苹果密码等）里选“手动输入设置密钥”，填入下面这串密钥：</p>
+        <p id="totpSecretText" class="mono-box"></p>
+        <p class="hint">也可以在 App 里直接粘贴这个链接添加：</p>
+        <p id="totpUrlText" class="mono-box small"></p>
+        <label class="field-label" for="totpConfirmCode">验证器里的 6 位动态码</label>
+        <input type="text" id="totpConfirmCode" placeholder="输入动态码完成开启" inputmode="numeric" autocomplete="one-time-code">
+        <button class="btn primary" id="totpConfirmBtn">确认开启</button>
+        <p class="error hidden" id="totpSetupError"></p>
+      </div>
+      <div id="totpBackupCodes" class="hidden">
+        <p class="hint">备用码（验证器丢失时用，每个只能用一次，请抄下来妥善保存，离开本页就不再显示）：</p>
+        <p id="totpBackupCodesText" class="mono-box"></p>
+      </div>
+      <div id="totpDisable" class="hidden">
+        <label class="field-label" for="totpDisablePassword">访问密码（确认关闭）</label>
+        <input type="password" id="totpDisablePassword" placeholder="请输入访问密码" autocomplete="current-password">
+        <button class="btn" id="totpDisableConfirmBtn">确认关闭</button>
+      </div>
+      <p class="error hidden" id="totpError"></p>
+      <p class="hint hidden" id="totpOk"></p>
+    </div>
   </section>
   </main>
   </div>
@@ -388,6 +415,10 @@
     <p class="muted">本站已开启访问保护，请输入访问密码。</p>
     <label class="field-label" for="loginPassword">访问密码</label>
     <input type="password" id="loginPassword" placeholder="请输入访问密码" autocomplete="current-password">
+    <div id="totpField" class="hidden">
+      <label class="field-label" for="loginTotp">验证器动态码</label>
+      <input type="text" id="loginTotp" placeholder="6 位动态码，或备用码" inputmode="numeric" autocomplete="one-time-code">
+    </div>
     <p class="error hidden" id="loginError"></p>
     <button class="btn primary btn-block" id="loginBtn">登录</button>
   </div>
