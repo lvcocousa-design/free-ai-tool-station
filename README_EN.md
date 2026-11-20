@@ -71,6 +71,7 @@ See [.env.example](.env.example) for the full list (copy it to `.env` and fill i
 | `S3_ENDPOINT` / `S3_BUCKET` / `S3_ACCESS_KEY` / `S3_SECRET_KEY` / `S3_REGION` | S3 backend settings (the first four are required when `STORAGE_BACKEND=s3`; `S3_REGION` defaults to `auto`, which is what R2 uses) |
 | `S3_FORCE_PATH_STYLE` | Set to `true` to force S3 path-style addressing (usually unnecessary; localhost / IP endpoints use path-style automatically) |
 | `RATE_LIMIT_PER_MINUTE` / `RATE_LIMIT_QUERY_PER_MINUTE` | Rate limits: heavy / query requests per IP per minute, defaults `60` / `300`, `0` disables the corresponding level |
+| `LOGIN_MAX_ATTEMPTS` / `LOGIN_WINDOW_MINUTES` | Login rate limit: max failed attempts per IP within the window / window length in minutes, defaults `5` / `15`, `0` attempts disables login rate limiting |
 | `INSTABOX_PROXY_URL` | InstaBox proxy URL |
 | `KAGGLE_USERNAME` / `KAGGLE_KEY` | Kaggle username / API key |
 | `KAGGLE_FLUX_SLUG` / `KAGGLE_VIDEO_SLUG` | Slugs of the Kaggle image / video kernels (have defaults, usually no need to change) |
@@ -177,7 +178,9 @@ By default the station is public: anyone who opens it can use it. If you deploy 
 ACCESS_PASSWORD=your-password
 ```
 
-Once set, the app shows a login page first; only the correct password lets you in. Unauthenticated requests to `/api/*` endpoints return 401 (except the login, health-check, and auth-status endpoints), and generated files under `/blobs/*` also require login. The login session is a random token kept in server memory, so it expires when the process restarts and you will need to log in again.
+Once set, the app shows a login page first; only the correct password lets you in. Unauthenticated requests to `/api/*` endpoints return 401 (except the login, health-check, and auth-status endpoints), and generated files under `/blobs/*` also require login. The login session is a random token kept in server memory, so it expires when the process restarts and you will need to log in again. The session cookie is `HttpOnly` + `Secure` + `SameSite=Lax`, so page JavaScript cannot read it.
+
+Against password guessing, failed logins are rate-limited: at most 5 failures per IP within 15 minutes, after which the API returns 429 (with a `Retry-After` header); a successful login clears that IP's failure count. Failed attempts are logged as warnings (IP only, never the password) and show up in Cloud Run logs. Tune with `LOGIN_MAX_ATTEMPTS` (default `5`, `0` disables) and `LOGIN_WINDOW_MINUTES` (default `15`).
 
 Exceptions: `GET /api/health` (so platforms like Cloud Run can health-check the service), `POST /api/login` and `GET /api/auth/status` (required for the login flow) are intentionally left unprotected.
 
@@ -187,7 +190,8 @@ To keep a single IP from overwhelming the service or burning through free quotas
 
 - **Heavy generation operations**: 60 requests per minute per IP. Covers image generation, video generation, chat, image analysis, translation, text-to-speech, speech-to-text, embeddings, provider connectivity tests, and backup import (`POST /api/generate`, `/api/video`, `/api/chat`, `/api/analyze`, `/api/translate`, `/api/tts`, `/api/stt`, `/api/embed`, `/api/providers/:name/test`, `/api/backup/import`).
 - **Query endpoints**: 300 requests per minute per IP. Covers all `GET` endpoints, deleting a chat (`DELETE /api/chats/:id`), and saving provider credentials (`POST /api/providers/:name`).
-- **Exempt**: health check `GET /api/health` and login `POST /api/login`.
+- **Login**: rate-limited separately (see "Access protection" above), at most 5 failures per IP within 15 minutes, after which the API returns 429.
+- **Exempt**: health check `GET /api/health`.
 - When the limit is exceeded, the API returns `429` (`{ok:false, message:'请求过于频繁，请稍后再试'}`) with a `Retry-After` header (in seconds).
 
 Tune with environment variables (see [.env.example](.env.example)): `RATE_LIMIT_PER_MINUTE` (heavy operations, default `60`, `0` disables heavy rate limiting) and `RATE_LIMIT_QUERY_PER_MINUTE` (query endpoints, default `300`, `0` disables query rate limiting). Non-integer or negative values are ignored (falls back to the default and logs a warning); the service still starts normally.

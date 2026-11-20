@@ -27,6 +27,7 @@ try {
 const { createContext } = require('./lib/context');
 const auth = require('./lib/auth');
 const rateLimiter = require('./lib/rate-limit');
+const loginLimiter = require('./lib/login-limit');
 
 const app = express();
 
@@ -128,6 +129,7 @@ const server = app.listen(port, () => {
   console.log(`[server] 存储后端：${store.getBackendName()}`);
   console.log(`[server] 访问保护：${auth.isAuthEnabled() ? '已启用' : '未启用（公开访问）'}`);
   console.log(`[server] 限流：${rateLimiter.describeRateLimit()}`);
+  console.log(`[server] 登录限流：${loginLimiter.describeLoginLimit()}`);
   if (store.getBackendName() === 'local') {
     console.log(`[server] 数据目录：${store.dataDir}`);
   }

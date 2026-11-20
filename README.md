@@ -71,6 +71,7 @@ Key 可以填在 `.env` 里，也可以在站内「设置」页录入（设置�
 | `S3_ENDPOINT` / `S3_BUCKET` / `S3_ACCESS_KEY` / `S3_SECRET_KEY` / `S3_REGION` | S3 后端配置（`STORAGE_BACKEND=s3` 时必填前 4 项；`S3_REGION` 默认 `auto`，R2 用 `auto`） |
 | `S3_FORCE_PATH_STYLE` | 设为 `true` 时强制 S3 path-style 寻址（一般不用改；localhost / IP 端点会自动用 path-style） |
 | `RATE_LIMIT_PER_MINUTE` / `RATE_LIMIT_QUERY_PER_MINUTE` | 限流：生成类 / 查询类每 IP 每分钟上限，默认 `60` / `300`，设为 `0` 关闭对应一级限流 |
+| `LOGIN_MAX_ATTEMPTS` / `LOGIN_WINDOW_MINUTES` | 登录限流：同一 IP 在窗口内最多失败次数 / 窗口分钟数，默认 `5` / `15`，次数设为 `0` 关闭登录限流 |
 | `INSTABOX_PROXY_URL` | InstaBox 代理地址 |
 | `KAGGLE_USERNAME` / `KAGGLE_KEY` | Kaggle 用户名 / API Key |
 | `KAGGLE_FLUX_SLUG` / `KAGGLE_VIDEO_SLUG` | Kaggle 出图 / 生视频 kernel 的 slug（有默认值，一般不用改） |
@@ -173,7 +174,9 @@ Cloud Run 是无状态的，实例重建或缩到 0 后本地 `data/` 目录会�
 ACCESS_PASSWORD=你的密码
 ```
 
-设置后，打开应用会先显示登录页，输对密码才能进入；未登录时 `/api/*` 接口返回 401（登录、健康检查与登录状态接口除外），生成的成品文件（`/blobs/*`）同样需要登录才能打开。登录会话是服务端内存里的随机 token，进程重启后失效，需重新登录。
+设置后，打开应用会先显示登录页，输对密码才能进入；未登录时 `/api/*` 接口返回 401（登录、健康检查与登录状态接口除外），生成的成品文件（`/blobs/*`）同样需要登录才能打开。登录会话是服务端内存里的随机 token，进程重启后失效，需重新登录。会话 Cookie 为 `HttpOnly` + `Secure` + `SameSite=Lax`，页面里的 JS 读不到。
+
+防密码猜测：登录失败会计入限流，同一 IP 15 分钟内最多 5 次失败，超了返回 429（带 `Retry-After` 头）；成功登录会清掉该 IP 的失败记录。失败尝试会记一条 warn 日志（只记 IP，不记密码），可在 Cloud Run 日志里看到。次数与窗口可用 `LOGIN_MAX_ATTEMPTS`（默认 `5`，设为 `0` 关闭）与 `LOGIN_WINDOW_MINUTES`（默认 `15`）调整。
 
 例外：`GET /api/health`（供 Cloud Run 等平台健康检查用）、`POST /api/login` 与 `GET /api/auth/status`（登录流程必需）不设防。
 
@@ -183,7 +186,8 @@ ACCESS_PASSWORD=你的密码
 
 - **生成类重操作**：每 IP 每分钟 60 次。包括出图、生视频、对话、识图、翻译、语音合成、语音转文字、向量、供应商连通性测试与备份导入（`POST /api/generate`、`/api/video`、`/api/chat`、`/api/analyze`、`/api/translate`、`/api/tts`、`/api/stt`、`/api/embed`、`/api/providers/:name/test`、`/api/backup/import`）。
 - **查询类接口**：每 IP 每分钟 300 次。包括所有 `GET` 接口、删除会话（`DELETE /api/chats/:id`）与保存供应商凭据（`POST /api/providers/:name`）。
-- **不限流**：健康检查 `GET /api/health` 与登录 `POST /api/login`。
+- **登录**：单独限流（见上方「访问保护」），同一 IP 15 分钟内最多 5 次失败，超了返回 429。
+- **不限流**：健康检查 `GET /api/health`。
 - 超限返回 `429`（`{ok:false, message:'请求过于频繁，请稍后再试'}`），并带 `Retry-After` 头（秒数）。
 
 可用环境变量调整（见 [.env.example](.env.example)）：`RATE_LIMIT_PER_MINUTE`（生成类，默认 `60`，设为 `0` 关闭生成类限流）、`RATE_LIMIT_QUERY_PER_MINUTE`（查询类，默认 `300`，设为 `0` 关闭查询类限流）。非整数或负数会被忽略（回落到默认值并记一条 warn 日志），服务照常启动。
