@@ -34,7 +34,7 @@ The Music tab only shows a notice and does not offer generation (see [Notes](#no
 | Groq | 200,000 tokens and 1,000 requests per model per day | No card required |
 | Zhipu z.ai | GLM Flash series models are free | International edition, no real-name verification required |
 | Google Gemini | Free input & output tokens on Flash / Flash-Lite models | Rate limits apply; free-tier content is used to improve Google's products |
-| NVIDIA NIM | Free trial | No card required, about 40 requests per minute; trial and evaluation only, not for production |
+| NVIDIA NIM | Free trial | No card required, about 40 requests per minute; trial and evaluation only, not for production; the connection test is a real chat probe and may take tens of seconds the first time |
 | DeepL API Free | 1,000,000 characters | Per the usage period shown on your account page |
 | ElevenLabs | 10,000 credits per month | Free accounts can only use premade voices for TTS; Music API is not available |
 | SiliconFlow | Some models are free | See the model page on the SiliconFlow website for the free models |

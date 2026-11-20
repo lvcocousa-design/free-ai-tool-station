@@ -34,7 +34,7 @@ English version: [README_EN.md](README_EN.md)
 | Groq | 每模型每天 20 万 tokens、1000 次请求 | 免绑卡 |
 | 智谱 z.ai | GLM Flash 系列模型免费 | 国际版，免实名 |
 | Google Gemini | Flash / Flash-Lite 模型输入输出 tokens 免费 | 有速率限制；免费档内容会被用于改进 Google 产品 |
-| NVIDIA NIM | 免费试用 | 免绑卡，约 40 请求/分钟；仅限试用评估，不可用于生产 |
+| NVIDIA NIM | 免费试用 | 免绑卡，约 40 请求/分钟；仅限试用评估，不可用于生产；连接测试为真实对话探测，首次可能需要几十秒 |
 | DeepL API Free | 100 万字符 | 以账号页显示的用量周期为准 |
 | ElevenLabs | 每月 10,000 credits | 免费账号 TTS 只能用 premade 音色；音乐 API 不可用 |
 | 硅基流动 | 部分模型免费 | 免费模型见硅基流动官网模型页 |
