@@ -123,15 +123,16 @@ function setNotConfigured(el, providerName) {
    功能页签注册表：加新功能时，在此注册一项 + 在 index.html 加一个
    id 为 panel-<id> 的 section；按钮由下方代码动态生成，无需改 HTML。
    onShow 为可选的切到该页签时执行的刷新函数。 */
+/* icon 为页签的 inline SVG（描边风格，24×24 画布，currentColor 着色） */
 const FEATURES = [
-  { id: 'create', label: '创作', onShow: loadHistory },
-  { id: 'chat', label: '对话/代码', onShow: loadChats },
-  { id: 'analyze', label: '识图' },
-  { id: 'translate', label: '翻译' },
-  { id: 'voice', label: '语音' },
-  { id: 'music', label: '音乐' },
-  { id: 'embed', label: '向量' },
-  { id: 'settings', label: '设置', onShow: loadUsage },
+  { id: 'create', label: '创作', icon: '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>', onShow: loadHistory },
+  { id: 'chat', label: '对话/代码', icon: '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>', onShow: loadChats },
+  { id: 'analyze', label: '识图', icon: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>' },
+  { id: 'translate', label: '翻译', icon: '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>' },
+  { id: 'voice', label: '语音', icon: '<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>' },
+  { id: 'music', label: '音乐', icon: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>' },
+  { id: 'embed', label: '向量', icon: '<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>' },
+  { id: 'settings', label: '设置', icon: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>', onShow: loadUsage },
 ];
 
 function showTab(name) {
@@ -147,7 +148,9 @@ function showTab(name) {
   const tabBar = $('tabBar');
   if (!tabBar) return;
   tabBar.innerHTML = FEATURES.map((f, i) =>
-    '<button class="tab-btn' + (i === 0 ? ' active' : '') + '" data-tab="' + esc(f.id) + '">' + esc(f.label) + '</button>'
+    '<button class="tab-btn' + (i === 0 ? ' active' : '') + '" data-tab="' + esc(f.id) + '">'
+    + '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + f.icon + '</svg>'
+    + '<span>' + esc(f.label) + '</span></button>'
   ).join('');
   tabBar.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => showTab(btn.dataset.tab));
@@ -159,6 +162,39 @@ document.addEventListener('click', (e) => {
   const a = e.target.closest('[data-goto-settings]');
   if (a) { e.preventDefault(); showTab('settings'); }
 });
+
+/* ---------- 主题切换：浅色 / 深色 ----------
+   默认跟随系统：index.html head 里的内联脚本已在首屏绘制前按
+   localStorage 或 prefers-color-scheme 设好 <html data-theme>；
+   手动切换后记入 localStorage，之后不再跟随系统变化。 */
+const THEME_KEY = 'theme';
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  const btn = $('themeToggleBtn');
+  if (btn) btn.setAttribute('aria-label', theme === 'dark' ? '切换到浅色模式' : '切换到深色模式');
+}
+
+$('themeToggleBtn').addEventListener('click', () => {
+  const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  try { localStorage.setItem(THEME_KEY, next); } catch (_) { /* 隐私模式忽略 */ }
+  applyTheme(next);
+});
+
+/* 未手动选过主题时，跟随系统偏好变化 */
+if (window.matchMedia) {
+  const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+  if (typeof mediaQuery.addEventListener === 'function') {
+    mediaQuery.addEventListener('change', (e) => {
+      let saved = null;
+      try { saved = localStorage.getItem(THEME_KEY); } catch (_) { /* 隐私模式忽略 */ }
+      if (saved !== 'dark' && saved !== 'light') applyTheme(e.matches ? 'dark' : 'light');
+    });
+  }
+}
+
+/* 与 head 内联脚本的初始选择同步一次（主要同步切换按钮的 aria-label） */
+applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light');
 
 /* ---------- 启动时加载：供应商配置 + 后端状态 ---------- */
 
