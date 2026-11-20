@@ -56,7 +56,7 @@ English version: [README_EN.md](README_EN.md)
 | Google Gemini | https://aistudio.google.com | 登录 Google AI Studio，在 API Keys 页创建 |
 | NVIDIA NIM | https://build.nvidia.com | 注册 NVIDIA 开发者账号后，在 API Keys 页创建（Key 以 `nvapi-` 开头） |
 
-Key 可以填在 `.env` 里，也可以在站内「设置」页录入（设置页的优先级更高）。
+Key 可以填在 `.env` 里，也可以在站内「设置」页录入（设置页的优先级更高）。设置页每个供应商都有「测试连接」按钮：只测不存，空输入时用已保存的 Key 测，填了新值则用新值测。
 
 ## 环境变量
 

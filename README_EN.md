@@ -56,7 +56,7 @@ Quotas are subject to each provider's latest official terms.
 | Google Gemini | https://aistudio.google.com | Log in to Google AI Studio and create a key on the API Keys page |
 | NVIDIA NIM | https://build.nvidia.com | After registering for an NVIDIA Developer account, create a key on the API Keys page (keys start with `nvapi-`) |
 
-Keys can be set in `.env`, or entered on the in-app **Settings** page (Settings-page keys take precedence).
+Keys can be set in `.env`, or entered on the in-app **Settings** page (Settings-page keys take precedence). Each provider on the Settings page has a **Test connection** button: test-only, never saves; with empty inputs it tests the saved key, and with new values entered it tests those instead.
 
 ## Environment Variables
 
