@@ -77,6 +77,14 @@ function fileToBase64(file) {
 
 function fmtNum(n) { return Number(n || 0).toLocaleString('en-US'); }
 
+/* 字节数 → 'x.xx GiB'（小于 1 GiB 时用 MiB），与 lib/quota.js 的 fmtBytes 同口径 */
+function fmtBytes(n) {
+  const bytes = Number(n) || 0;
+  if (bytes >= 1024 * 1024 * 1024) return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GiB';
+  if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(2) + ' MiB';
+  return fmtNum(bytes) + ' 字节';
+}
+
 /* ---------- 全局状态 ---------- */
 
 const state = {
@@ -1328,19 +1336,53 @@ async function loadUsage() {
     }
     if (u.elevenlabs) {
       const e = u.elevenlabs;
-      rows.push('<div class="usage-row">ElevenLabs（本月）<br>已用 <b>' + fmtNum(e.character_count)
-        + '</b> / ' + fmtNum(e.character_limit) + ' 字符'
-        + usageBar(e.character_count, e.character_limit) + '</div>');
+      // 后端返回 camelCase（characterCount/characterLimit），兼容旧 snake_case。
+      const used = e.characterCount ?? e.character_count;
+      const limit = e.characterLimit ?? e.character_limit;
+      rows.push('<div class="usage-row">ElevenLabs（本月）<br>已用 <b>' + fmtNum(used)
+        + '</b> / ' + fmtNum(limit) + ' 字符'
+        + usageBar(used, limit) + '</div>');
     } else {
       rows.push('<div class="usage-row">ElevenLabs：未配置或暂未查到用量</div>');
     }
     if (u.deepl) {
       const d = u.deepl;
-      rows.push('<div class="usage-row">DeepL<br>已用 <b>' + fmtNum(d.character_count)
-        + '</b> / ' + fmtNum(d.character_limit) + ' 字符'
-        + usageBar(d.character_count, d.character_limit) + '</div>');
+      const used = d.characterCount ?? d.character_count;
+      const limit = d.characterLimit ?? d.character_limit;
+      rows.push('<div class="usage-row">DeepL<br>已用 <b>' + fmtNum(used)
+        + '</b> / ' + fmtNum(limit) + ' 字符'
+        + usageBar(used, limit) + '</div>');
     } else {
       rows.push('<div class="usage-row">DeepL：未配置或暂未查到用量</div>');
+    }
+    // Groq 上限：每模型每天 20 万 tokens + 1000 次请求（与 lib/quota.js 一致）。
+    if (u.groq && u.groq.byModel && Object.keys(u.groq.byModel).length) {
+      for (const [model, entry] of Object.entries(u.groq.byModel)) {
+        rows.push('<div class="usage-row">Groq ' + esc(model) + '（当日）<br>已用 <b>'
+          + fmtNum(entry.tokens) + '</b> / 200,000 tokens'
+          + usageBar(entry.tokens, 200000)
+          + '请求 <b>' + fmtNum(entry.requests) + '</b> / 1,000 次'
+          + usageBar(entry.requests, 1000) + '</div>');
+      }
+    } else {
+      rows.push('<div class="usage-row">Groq（当日）：暂无用量</div>');
+    }
+    if (u.storage) {
+      const s = u.storage;
+      if (s.bytes === null || s.bytes === undefined) {
+        rows.push('<div class="usage-row">存储用量：暂未查到</div>');
+      } else {
+        rows.push('<div class="usage-row">存储用量<br>已用 <b>' + fmtBytes(s.bytes)
+          + '</b> / ' + fmtBytes(s.limit)
+          + usageBar(s.bytes, s.limit) + '</div>');
+      }
+    }
+    if (u.requests) {
+      const r = u.requests;
+      const limitText = r.limit === 0 ? '不限' : fmtNum(r.limit) + ' 次';
+      rows.push('<div class="usage-row">本月 API 请求' + (r.month ? '（' + esc(r.month) + '）' : '')
+        + '<br>已用 <b>' + fmtNum(r.count) + '</b> / ' + limitText
+        + (r.limit > 0 ? usageBar(r.count, r.limit) : '') + '</div>');
     }
     box.innerHTML = rows.length ? rows.join('') : '<p class="muted">暂无用量数据。</p>';
   } catch (e) {
