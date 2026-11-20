@@ -66,6 +66,41 @@ test('Gemini 模型配置：对话与识图默认值与模型 id 一致', () => 
   assert.equal(models.isSupported('chat', 'gemini', 'gemini-2.5-flash'), false);
 });
 
+test('NVIDIA NIM 模型配置：对话默认值与 9 个模型 id 一致', () => {
+  assert.equal(models.getDefaultModel('chat', 'nvidia'), 'z-ai/glm-5.3-flash');
+  assert.deepEqual(
+    models.getModels('chat', 'nvidia').map((m) => m.id),
+    [
+      'z-ai/glm-5.3-flash',
+      'moonshotai/kimi-k3.1-pro',
+      'nvidia/nemotron-3.5-lightning-30b-a3b',
+      'minimaxai/minimax-m3.1-flash',
+      'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning',
+      'mistralai/mistral-large-4-1t-a52b',
+      'stepfun-ai/step-5-preview',
+      'google/gemma-4-31b-it',
+      'meta/muse-glimmer-30b',
+    ],
+  );
+  assert.deepEqual(
+    models.getModels('chat', 'nvidia').map((m) => m.label),
+    [
+      'GLM-5.3-Flash',
+      'Kimi K3.1 Pro',
+      'Nemotron 3.5 Lightning 30B',
+      'MiniMax M3.1 Flash',
+      'Nemotron 3 Nano Omni 30B Reasoning',
+      'Mistral Large 4',
+      'Step-5 Preview',
+      'Gemma 4 31B',
+      'Muse Glimmer 30B',
+    ],
+  );
+  assert.equal(models.isSupported('chat', 'nvidia', 'z-ai/glm-5.3-flash'), true);
+  assert.equal(models.isSupported('chat', 'nvidia', 'moonshotai/kimi-k3.1-pro'), true);
+  assert.equal(models.isSupported('chat', 'nvidia', 'openai/gpt-oss-120b'), false);
+});
+
 test('识图/出图/翻译/语音/向量默认值与模型 id 一致', () => {
   assert.equal(models.getDefaultModel('vision', 'zhipu'), 'glm-4.6v-flash');
   assert.equal(

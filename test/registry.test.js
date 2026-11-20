@@ -1,6 +1,6 @@
 // test/registry.test.js — 供应商注册表（lib/provider-registry.js）
 //
-// 覆盖：自动发现 9 个供应商、meta 校验、forCapability、缺 meta 模块被跳过
+// 覆盖：自动发现 10 个供应商、meta 校验、forCapability、缺 meta 模块被跳过
 // 不崩启动、test/getUsage 接口形状。
 // test/getUsage 用 stubbed fetch，不联网；只用假 Key（fake-key-xxx）。
 
@@ -18,7 +18,7 @@ const FAKE_ACCOUNT = 'fake-account-id';
 
 const EXPECTED_ORDER = [
   'zhipu', 'groq', 'cloudflare', 'deepl',
-  'elevenlabs', 'siliconflow', 'kaggle', 'instabox', 'gemini',
+  'elevenlabs', 'siliconflow', 'kaggle', 'instabox', 'gemini', 'nvidia',
 ];
 
 const EXPECTED_ENVS = {
@@ -31,6 +31,7 @@ const EXPECTED_ENVS = {
   kaggle: { username: 'KAGGLE_USERNAME', apiKey: 'KAGGLE_KEY' },
   instabox: { proxyUrl: 'INSTABOX_PROXY_URL' },
   gemini: { apiKey: 'GEMINI_API_KEY' },
+  nvidia: { apiKey: 'NVIDIA_API_KEY' },
 };
 
 const ALLOWED_CAPABILITIES = new Set([
@@ -61,10 +62,10 @@ function stubFetch(t, impl) {
 
 // ---------------- 自动发现与 meta ----------------
 
-test('自动发现 9 个供应商，按 order 排序，无跳过', () => {
+test('自动发现 10 个供应商，按 order 排序，无跳过', () => {
   assert.deepEqual(registry.names(), EXPECTED_ORDER);
   assert.deepEqual(registry.skippedNames(), []);
-  assert.equal(registry.list().length, 9);
+  assert.equal(registry.list().length, 10);
 });
 
 test('get(name)：已加载的返回模块，未知的返回 null', () => {
@@ -117,7 +118,7 @@ test('每个供应商都导出 test 函数；只有 elevenlabs/deepl 导出 getU
   }
   assert.equal(typeof registry.get('elevenlabs').getUsage, 'function');
   assert.equal(typeof registry.get('deepl').getUsage, 'function');
-  for (const name of ['zhipu', 'groq', 'cloudflare', 'siliconflow', 'kaggle', 'instabox', 'gemini']) {
+  for (const name of ['zhipu', 'groq', 'cloudflare', 'siliconflow', 'kaggle', 'instabox', 'gemini', 'nvidia']) {
     assert.equal(registry.get(name).getUsage, undefined, `${name} 不应导出 getUsage`);
   }
 });
@@ -126,7 +127,7 @@ test('每个供应商都导出 test 函数；只有 elevenlabs/deepl 导出 getU
 
 test('forCapability：各能力返回对应供应商，按 order 排序', () => {
   const names = (cap) => registry.forCapability(cap).map((m) => m.meta.name);
-  assert.deepEqual(names('chat'), ['zhipu', 'groq', 'cloudflare', 'gemini']);
+  assert.deepEqual(names('chat'), ['zhipu', 'groq', 'cloudflare', 'gemini', 'nvidia']);
   assert.deepEqual(names('vision'), ['zhipu', 'siliconflow', 'gemini']);
   assert.deepEqual(names('image'), ['cloudflare', 'kaggle', 'instabox']);
   assert.deepEqual(names('video'), ['kaggle']);
