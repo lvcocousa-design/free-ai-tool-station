@@ -140,3 +140,12 @@ test('nvidia.test：上游 200 时返回 {ok:true}', async (t) => {
   }));
   assert.deepEqual(await nvidia.test({ apiKey: FAKE_KEY }), { ok: true });
 });
+
+// NVIDIA 免费端点首次推理常需几十秒，15 秒默认超时会误报；探测改用 90 秒，
+// 超时文案里的秒数即锁死这一点（probeErrorMessage 用传入的超时值生成文案）。
+test('nvidia.test：超时时 message 含“90 秒”（探测用 90 秒超时，不是默认 15 秒）', async (t) => {
+  stubFetch(t, async () => { throw timeoutError(); });
+  const result = await nvidia.test({ apiKey: FAKE_KEY });
+  assert.equal(result.ok, false);
+  assert.match(result.message, /90 秒/);
+});
