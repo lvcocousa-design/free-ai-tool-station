@@ -9,6 +9,9 @@
 // - 按 IP 限流（lib/rate-limit.js 中间件，挂在 requireAuth 之后）：
 //   生成类重操作默认每 IP 每分钟 60 次，查询类默认 300 次；
 //   GET /api/health 与 POST /api/login 不限流；超限返回 429
+// - 全站每月请求数上限（lib/quota.js 中间件，挂在 requireAuth 之后、
+//   限流之前）：/api/* 每月默认 1,500,000 次，到顶返回 429；
+//   健康检查、登录、状态查询、用量查询、二次验证接口不计数也不拦截
 // - 监听 PORT 环境变量（默认 8080）
 
 const fs = require('fs');
@@ -28,6 +31,7 @@ const { createContext } = require('./lib/context');
 const auth = require('./lib/auth');
 const rateLimiter = require('./lib/rate-limit');
 const loginLimiter = require('./lib/login-limit');
+const quota = require('./lib/quota');
 
 const app = express();
 
@@ -49,6 +53,10 @@ app.use((err, req, res, next) => {
 // 未设置 ACCESS_PASSWORD 时中间件直接放行；静态前端本身不设防，由前端
 // 查 /api/auth/status 决定是否显示登录页。
 app.use(auth.requireAuth);
+
+// 全站每月请求数上限（lib/quota.js）：挂在 requireAuth 之后、限流之前，
+// 未登录请求先返回 401，不计入每月请求数；到顶返回 429。
+app.use(quota.createRequestCounter());
 
 // 按 IP 限流（lib/rate-limit.js）：挂在 requireAuth 之后，未登录请求先
 // 返回 401，不占用限流配额；非 /api/* 路径与健康检查、登录接口不限流。
@@ -131,6 +139,10 @@ const server = app.listen(port, () => {
   if (process.env.TOTP_DISABLE === '1') {
     console.log('[server] 警告：TOTP_DISABLE=1，二次验证已被跳过（恢复口子，用完请删掉该变量）');
   }
+  if (quota.isDisabled()) {
+    console.log('[server] 警告：QUOTA_DISABLED=1，全部用量上限拦截已关闭，超量不再拦');
+  }
+  console.log(`[server] ${quota.describeQuotas()}`);
   console.log(`[server] 限流：${rateLimiter.describeRateLimit()}`);
   console.log(`[server] 登录限流：${loginLimiter.describeLoginLimit()}`);
   if (store.getBackendName() === 'local') {

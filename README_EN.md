@@ -198,6 +198,27 @@ To keep a single IP from overwhelming the service or burning through free quotas
 
 Tune with environment variables (see [.env.example](.env.example)): `RATE_LIMIT_PER_MINUTE` (heavy operations, default `60`, `0` disables heavy rate limiting) and `RATE_LIMIT_QUERY_PER_MINUTE` (query endpoints, default `300`, `0` disables query rate limiting). Non-integer or negative values are ignored (falls back to the default and logs a warning); the service still starts normally.
 
+## Usage quotas
+
+To prevent free quotas from being exceeded and causing charges (mainly Cloud Run and R2, which have a payment method on file and no hard cutoff), the app enforces usage quotas at the application layer: when a provider's free quota is exhausted, the call is blocked before reaching the upstream service and returns `429` (`{ok:false, quotaExceeded:true, message:'…'}`), with the message stating the quota and when it resets. The Settings page (\"Remaining usage\") shows current usage against each quota.
+
+| Quota | Limit | Resets |
+| --- | --- | --- |
+| Cloudflare Workers AI | 10,000 Neurons/day, **blocked at 90% (9,000)** (hitting the real limit triggers a 24-hour Cloudflare block, so a margin is kept) | Daily at 08:00 Beijing time |
+| Groq | 200,000 tokens + 1,000 requests per model per day | Daily at 08:00 Beijing time |
+| ElevenLabs / DeepL | Per the official usage API; blocked when used up (cached for 10 minutes, refreshed when stale) | Next billing/quota cycle |
+| Kaggle | 108,000 GPU seconds/week (30 hours); a per-task reserve is held when blocking (600s for images, 3,600s for videos) — blocked when the remainder is below the reserve | Mondays at 08:00 Beijing time |
+| Storage (R2 / local) | 8 GiB (R2 free tier is 10 GB, with margin kept); checked before image/video generation | After cleaning up old files (there is no in-app delete feature; clean up in the R2 console) |
+| Site-wide monthly requests | 1,500,000 (75% of Cloud Run's free 2M requests) | 1st of next month |
+
+Notes:
+
+- Blocking happens after input validation and configuration checks but before any upstream call, so no half-finished session or job is left behind; a blocked request consumes no quota.
+- The health check, login, status, usage, and two-factor endpoints are not counted toward the monthly request total and are not blocked by the monthly request limit.
+- Image analysis (`/api/analyze`) and provider connectivity tests (`/api/providers/:name/test`) are not quota-blocked: the former's providers have no enforceable public quota, and the latter is a single manual probe that cannot cause overage.
+- Fail open when usage cannot be determined: for example, if storage usage cannot be measured or the ElevenLabs/DeepL official usage refresh fails, the request is allowed through and only a warning is logged.
+- Tune with environment variables (see [.env.example](.env.example)): `QUOTA_STORAGE_BYTES` (storage limit in bytes, default 8 GiB), `QUOTA_MONTHLY_REQUESTS` (monthly request limit, default `1500000`, `0` disables it), `QUOTA_CLOUDFLARE_FRACTION` (Cloudflare block threshold ratio, default `0.9`), `QUOTA_DISABLED=1` (disables all quota blocking and logs a warning at startup; do not set this in normal use).
+
 ## Notes
 
 - **No music generation**: the ElevenLabs Music API requires a paid plan; free accounts get a 402 error, so this app does not offer music generation and the Music tab only shows a notice.
@@ -215,7 +236,7 @@ Tests use Node's built-in `node:test` with no extra dependencies and no network 
 npm test
 ```
 
-Coverage: local storage read/write (JSON and blobs, extension sanitizing, path-traversal protection), S3 signing (SigV4 pure function), provider error formatting (Groq / z.ai / DeepL), wizard endpoint parameter validation, usage accounting (Cloudflare daily, Kaggle weekly, cross-day/cross-week reset, corrupt-file fallback), the provider plugin registry (auto-discovery, meta validation, broken-module tolerance), model configuration (load validation, defaults, support checks), access password protection (open access when unset, 401 when set, login and token validation), backup export/import (merge dedup, no credentials exported), generation parameter normalization (steps/CFG clamping, size presets, backend overrides), and per-IP rate limiting (sliding window, classification, exemptions, and 429). All tests use temporary directories (`DATA_DIR` pointing under `os.tmpdir()`) and clean up afterwards, so they never touch the project's `data/` directory.
+Coverage: local storage read/write (JSON and blobs, extension sanitizing, path-traversal protection), S3 signing (SigV4 pure function), provider error formatting (Groq / z.ai / DeepL), wizard endpoint parameter validation, usage accounting (Cloudflare daily, Kaggle weekly, cross-day/cross-week reset, corrupt-file fallback), the provider plugin registry (auto-discovery, meta validation, broken-module tolerance), model configuration (load validation, defaults, support checks), access password protection (open access when unset, 401 when set, login and token validation), backup export/import (merge dedup, no credentials exported), generation parameter normalization (steps/CFG clamping, size presets, backend overrides), and per-IP rate limiting (sliding window, classification, exemptions, and 429), and usage quotas (quota-check boundaries, environment-variable overrides, route-level 429 blocking, storage usage measurement). All tests use temporary directories (`DATA_DIR` pointing under `os.tmpdir()`) and clean up afterwards, so they never touch the project's `data/` directory.
 
 ## Extending
 

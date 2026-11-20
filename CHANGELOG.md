@@ -13,9 +13,11 @@
 - 登录防猜测：登录失败限流（同一 IP 15 分钟内最多 5 次失败，超了返回 429；成功登录清零），失败尝试记 warn 日志（只记 IP）；会话 Cookie 加 `Secure` 标记。
 - TOTP 二次验证：设置页可开启（验证器 App 手动填密钥，动态码确认），登录需密码 + 6 位动态码；开启时一次给出 8 个一次性备用码；验证器与备用码全丢时可用环境变量 `TOTP_DISABLE=1` 恢复（部署后跳过二次验证，进站关闭再重开）。
 - 设置页每个供应商增加「测试连接」按钮：只测不存，空输入时用已保存的凭据测，填了新值则用新值测（存了旧值的其他字段自动补齐）。
+- 应用层用量上限：各供应商免费额度到顶时在调上游之前拦截，返回 429 + `quotaExceeded`。Cloudflare 每天 10,000 Neurons 按 90%（9,000）拦截；Groq 每模型每天 200,000 tokens + 1,000 次请求；ElevenLabs/DeepL 按缓存的官方用量（超 10 分钟先刷新）；Kaggle 每周 108,000 GPU 秒，拦截时按任务预留（出图 600 秒、生视频 3,600 秒）；存储上限 8 GiB（出图/生视频前检查，R2 后端列桶求和、本地后端遍历目录，结果缓存 10 分钟）；全站每月请求数上限 1,500,000 次（健康检查、登录、状态/用量查询、二次验证接口不计数也不拦截）。用量查不到时 fail open（放行并记 warn 日志）。环境变量：`QUOTA_STORAGE_BYTES`、`QUOTA_MONTHLY_REQUESTS`（0 关闭）、`QUOTA_CLOUDFLARE_FRACTION`、`QUOTA_DISABLED=1`（关闭全部拦截）。设置页「剩余用量」新增 Groq 各模型、存储用量、本月请求数三行。备份导入的用量清洗同步支持 groq/requests 字段，旧备份缺字段时补默认值。
 
 ### Fixed
 
+- 设置页「剩余用量」里 ElevenLabs/DeepL 两行一直显示“已用 0 / 0 字符”：前端读的是 snake_case 字段（`character_count`/`character_limit`），后端返回的却是 camelCase（`characterCount`/`characterLimit`）；现前端优先读 camelCase，兼容旧 snake_case。
 - NVIDIA NIM 连接测试一直超时：探测是真实对话请求，而 probe 默认超时只有 15 秒，NVIDIA 免费端点首次推理常需几十秒；现探测改用 90 秒超时（probe 支持按需传超时），设置页提示测试首次可能需要几十秒。
 
 ## [0.1.0] - 2026-11-19
