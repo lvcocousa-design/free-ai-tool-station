@@ -61,7 +61,7 @@ module.exports = {
 | `capabilities` | Yes | Capability list; values are in the table below |
 | `credentials` | Yes | Credential field definitions, see Section 1.4 |
 
-Existing providers' `order`: zhipu 10, groq 20, cloudflare 30, deepl 40, elevenlabs 50, siliconflow 60, kaggle 70, instabox 80, gemini 90. New providers start at 100 and count up (100, 110, 120, …); do not insert numbers between existing ones.
+Existing providers' `order`: zhipu 10, groq 20, cloudflare 30, deepl 40, elevenlabs 50, siliconflow 60, kaggle 70, instabox 80, gemini 90, nvidia 95. New providers start at 100 and count up (100, 110, 120, …); do not insert numbers between existing ones.
 
 `capabilities` values and their functions:
 

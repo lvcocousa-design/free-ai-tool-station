@@ -65,7 +65,7 @@ gcloud run deploy free-ai-tool-station \
   --region asia-east1 \
   --allow-unauthenticated \
   --port 8080 \
-  --set-env-vars PORT=8080,KAGGLE_USERNAME=你的用户名,KAGGLE_KEY=你的Key,CLOUDFLARE_ACCOUNT_ID=你的账号ID,CLOUDFLARE_API_TOKEN=你的Token,GROQ_API_KEY=你的Key,ZHIPU_API_KEY=你的Key,GEMINI_API_KEY=你的Key,DEEPL_API_KEY=你的Key,ELEVENLABS_API_KEY=你的Key,SILICONFLOW_API_KEY=你的Key,INSTABOX_PROXY_URL=你的代理地址,ACCESS_PASSWORD=你的访问密码
+  --set-env-vars PORT=8080,KAGGLE_USERNAME=你的用户名,KAGGLE_KEY=你的Key,CLOUDFLARE_ACCOUNT_ID=你的账号ID,CLOUDFLARE_API_TOKEN=你的Token,GROQ_API_KEY=你的Key,ZHIPU_API_KEY=你的Key,GEMINI_API_KEY=你的Key,NVIDIA_API_KEY=你的Key,DEEPL_API_KEY=你的Key,ELEVENLABS_API_KEY=你的Key,SILICONFLOW_API_KEY=你的Key,INSTABOX_PROXY_URL=你的代理地址,ACCESS_PASSWORD=你的访问密码
 ```
 
 只填需要用的供应商即可，不用的留空（不要写进 `--set-env-vars`）。`ACCESS_PASSWORD` 是访问密码（可选）：上面命令用了 `--allow-unauthenticated`，服务对公网公开，不想公开访问时建议设置，见 README「访问保护」一节。注意：命令行里的 Key 会留在 shell 历史记录中，用完可考虑清理历史。

@@ -61,7 +61,7 @@ module.exports = {
 | `capabilities` | 是 | 能力列表，取值见下方能力表 |
 | `credentials` | 是 | 凭据字段定义，见 1.4 节 |
 
-现有供应商的 `order`：zhipu 10、groq 20、cloudflare 30、deepl 40、elevenlabs 50、siliconflow 60、kaggle 70、instabox 80、gemini 90。新供应商从 100 起往后排（100、110、120……），不要插进现有序号中间。
+现有供应商的 `order`：zhipu 10、groq 20、cloudflare 30、deepl 40、elevenlabs 50、siliconflow 60、kaggle 70、instabox 80、gemini 90、nvidia 95。新供应商从 100 起往后排（100、110、120……），不要插进现有序号中间。
 
 `capabilities` 取值与对应函数：
 
