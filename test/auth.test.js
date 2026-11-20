@@ -99,10 +99,11 @@ test('requireAuth：/api/login、/api/health、/api/auth/status 与静态路径�
   assert.equal(res.statusCode, 401);
 });
 
-test('buildAuthCookie：httpOnly，不含密码本身', () => {
+test('buildAuthCookie：httpOnly + Secure，不含密码本身', () => {
   const cookie = auth.buildAuthCookie('some-token-value');
   assert.match(cookie, /^auth_token=some-token-value;/);
   assert.match(cookie, /HttpOnly/);
+  assert.match(cookie, /Secure/);
   assert.match(cookie, /Path=\//);
   assert.doesNotMatch(cookie, new RegExp(FAKE_PASSWORD));
 });
@@ -302,5 +303,67 @@ describe('设置 ACCESS_PASSWORD 后', () => {
       headers: { Cookie: 'auth_token=forged-token-xyz' },
     });
     assert.equal(res.status, 401);
+  });
+});
+
+describe('登录限流（LOGIN_MAX_ATTEMPTS=3）', () => {
+  let server;
+  before(async () => {
+    server = await startServer({ ACCESS_PASSWORD: FAKE_PASSWORD, LOGIN_MAX_ATTEMPTS: '3' });
+  });
+  after(async () => { await server.stop(); });
+
+  async function login(password) {
+    const res = await fetch(`${server.baseUrl}/api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    });
+    return { res, json: await res.json() };
+  }
+
+  test('3 次失败后第 4 次返回 429，带 Retry-After', async () => {
+    for (let i = 0; i < 3; i++) {
+      const { res, json } = await login(WRONG_PASSWORD);
+      assert.equal(res.status, 401);
+      assert.equal(json.message, '密码不正确');
+    }
+    const { res, json } = await login(WRONG_PASSWORD);
+    assert.equal(res.status, 429);
+    assert.equal(json.ok, false);
+    assert.match(json.message, /过于频繁/);
+    assert.ok(res.headers.get('Retry-After'), '429 应带 Retry-After 头');
+  });
+});
+
+describe('登录成功清掉失败计数', () => {
+  let server;
+  before(async () => {
+    server = await startServer({ ACCESS_PASSWORD: FAKE_PASSWORD, LOGIN_MAX_ATTEMPTS: '3' });
+  });
+  after(async () => { await server.stop(); });
+
+  async function login(password) {
+    const res = await fetch(`${server.baseUrl}/api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    });
+    return { res, json: await res.json() };
+  }
+
+  test('2 次失败后登录成功，再错 3 次仍是 401（计数已清零）', async () => {
+    for (let i = 0; i < 2; i++) {
+      const { res } = await login(WRONG_PASSWORD);
+      assert.equal(res.status, 401);
+    }
+    const ok = await login(FAKE_PASSWORD);
+    assert.equal(ok.res.status, 200);
+    for (let i = 0; i < 3; i++) {
+      const { res } = await login(WRONG_PASSWORD);
+      assert.equal(res.status, 401);
+    }
+    const { res } = await login(WRONG_PASSWORD);
+    assert.equal(res.status, 429);
   });
 });

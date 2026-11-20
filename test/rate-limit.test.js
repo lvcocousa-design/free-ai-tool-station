@@ -69,6 +69,24 @@ test('窗口计数：reset() 清空全部计数', () => {
   assert.equal(counter.check('ip-a', 1, 1000).allowed, true);
 });
 
+test('窗口计数：count/record/delete/retryAfterSeconds（登录失败计数用）', () => {
+  const counter = new SlidingWindowCounter({ windowMs: 60000 });
+  assert.equal(counter.count('ip-a', 1000), 0);
+  assert.equal(counter.retryAfterSeconds('ip-a', 1000), 0);
+  counter.record('ip-a', 1000);
+  counter.record('ip-a', 2000);
+  assert.equal(counter.count('ip-a', 3000), 2);
+  // 窗口内最早一条在 t=1000，到 t=3000 时还需等 (1000+60000-3000)/1000=58 秒。
+  assert.equal(counter.retryAfterSeconds('ip-a', 3000), 58);
+  // 旧记录滑出窗口后计数归零。
+  assert.equal(counter.count('ip-a', 62000), 0);
+  assert.equal(counter.retryAfterSeconds('ip-a', 62000), 0);
+  counter.record('ip-a', 62000);
+  assert.equal(counter.count('ip-a', 62000), 1);
+  counter.delete('ip-a');
+  assert.equal(counter.count('ip-a', 62000), 0);
+});
+
 // ---------- 2a. 分级 ----------
 
 test('分级：9 个重操作 POST + 供应商连通性测试都算 heavy', () => {
