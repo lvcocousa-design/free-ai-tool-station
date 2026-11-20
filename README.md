@@ -178,13 +178,15 @@ ACCESS_PASSWORD=你的密码
 
 防密码猜测：登录失败会计入限流，同一 IP 15 分钟内最多 5 次失败，超了返回 429（带 `Retry-After` 头）；成功登录会清掉该 IP 的失败记录。失败尝试会记一条 warn 日志（只记 IP，不记密码），可在 Cloud Run 日志里看到。次数与窗口可用 `LOGIN_MAX_ATTEMPTS`（默认 `5`，设为 `0` 关闭）与 `LOGIN_WINDOW_MINUTES`（默认 `15`）调整。
 
+二次验证（TOTP）：设置了访问密码后，可在设置页开启。开启时把显示的密钥手动填进验证器 App（Google Authenticator、微软 Authenticator、苹果密码等），输一次动态码确认即可；之后登录除密码外还要输 6 位动态码。开启成功时会一次给出 8 个备用码（验证器丢失时用，每个只能用一次，请抄下来妥善保存，离开页面就不再显示；备用码不含在数据备份里）。验证器与备用码全丢时：把环境变量 `TOTP_DISABLE=1` 加进部署并重新部署，登录会跳过二次验证；进站后在设置页关闭二次验证，删掉该变量再重新部署并重新开启。
+
 例外：`GET /api/health`（供 Cloud Run 等平台健康检查用）、`POST /api/login` 与 `GET /api/auth/status`（登录流程必需）不设防。
 
 ## 限流
 
 为防止单 IP 频繁调用拖垮服务或耗尽免费额度，`/api/*` 接口按 IP 限流（内存滑动窗口，每分钟窗口，进程重启后计数清零）：
 
-- **生成类重操作**：每 IP 每分钟 60 次。包括出图、生视频、对话、识图、翻译、语音合成、语音转文字、向量、供应商连通性测试与备份导入（`POST /api/generate`、`/api/video`、`/api/chat`、`/api/analyze`、`/api/translate`、`/api/tts`、`/api/stt`、`/api/embed`、`/api/providers/:name/test`、`/api/backup/import`）。
+- **生成类重操作**：每 IP 每分钟 60 次。包括出图、生视频、对话、识图、翻译、语音合成、语音转文字、向量、供应商连通性测试、备份导入与二次验证确认（`POST /api/generate`、`/api/video`、`/api/chat`、`/api/analyze`、`/api/translate`、`/api/tts`、`/api/stt`、`/api/embed`、`/api/providers/:name/test`、`/api/backup/import`、`/api/totp/confirm`）。
 - **查询类接口**：每 IP 每分钟 300 次。包括所有 `GET` 接口、删除会话（`DELETE /api/chats/:id`）与保存供应商凭据（`POST /api/providers/:name`）。
 - **登录**：单独限流（见上方「访问保护」），同一 IP 15 分钟内最多 5 次失败，超了返回 429。
 - **不限流**：健康检查 `GET /api/health`。

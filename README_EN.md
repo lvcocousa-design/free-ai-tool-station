@@ -182,13 +182,15 @@ Once set, the app shows a login page first; only the correct password lets you i
 
 Against password guessing, failed logins are rate-limited: at most 5 failures per IP within 15 minutes, after which the API returns 429 (with a `Retry-After` header); a successful login clears that IP's failure count. Failed attempts are logged as warnings (IP only, never the password) and show up in Cloud Run logs. Tune with `LOGIN_MAX_ATTEMPTS` (default `5`, `0` disables) and `LOGIN_WINDOW_MINUTES` (default `15`).
 
+Two-factor authentication (TOTP): once an access password is set, it can be enabled from the settings page. Enter the displayed secret manually into an authenticator app (Google Authenticator, Microsoft Authenticator, Apple Passwords, etc.) and confirm with one code; afterwards, login requires the 6-digit code in addition to the password. Enabling returns 8 backup codes (for use if the authenticator is lost; each works once — write them down, they are never shown again and are not included in data backups). If both the authenticator and the backup codes are lost: deploy with the environment variable `TOTP_DISABLE=1` set, which skips two-factor authentication at login; then disable it from the settings page, remove the variable, redeploy, and enable it again.
+
 Exceptions: `GET /api/health` (so platforms like Cloud Run can health-check the service), `POST /api/login` and `GET /api/auth/status` (required for the login flow) are intentionally left unprotected.
 
 ## Rate limiting
 
 To keep a single IP from overwhelming the service or burning through free quotas, `/api/*` endpoints are rate-limited per IP (in-memory sliding window, one-minute window; counters reset when the process restarts):
 
-- **Heavy generation operations**: 60 requests per minute per IP. Covers image generation, video generation, chat, image analysis, translation, text-to-speech, speech-to-text, embeddings, provider connectivity tests, and backup import (`POST /api/generate`, `/api/video`, `/api/chat`, `/api/analyze`, `/api/translate`, `/api/tts`, `/api/stt`, `/api/embed`, `/api/providers/:name/test`, `/api/backup/import`).
+- **Heavy generation operations**: 60 requests per minute per IP. Covers image generation, video generation, chat, image analysis, translation, text-to-speech, speech-to-text, embeddings, provider connectivity tests, backup import, and two-factor confirmation (`POST /api/generate`, `/api/video`, `/api/chat`, `/api/analyze`, `/api/translate`, `/api/tts`, `/api/stt`, `/api/embed`, `/api/providers/:name/test`, `/api/backup/import`, `/api/totp/confirm`).
 - **Query endpoints**: 300 requests per minute per IP. Covers all `GET` endpoints, deleting a chat (`DELETE /api/chats/:id`), and saving provider credentials (`POST /api/providers/:name`).
 - **Login**: rate-limited separately (see "Access protection" above), at most 5 failures per IP within 15 minutes, after which the API returns 429.
 - **Exempt**: health check `GET /api/health`.

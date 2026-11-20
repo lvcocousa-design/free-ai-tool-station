@@ -128,6 +128,9 @@ const server = app.listen(port, () => {
   console.log(`[server] 免费AI工具站后端已启动：http://localhost:${port}`);
   console.log(`[server] 存储后端：${store.getBackendName()}`);
   console.log(`[server] 访问保护：${auth.isAuthEnabled() ? '已启用' : '未启用（公开访问）'}`);
+  if (process.env.TOTP_DISABLE === '1') {
+    console.log('[server] 警告：TOTP_DISABLE=1，二次验证已被跳过（恢复口子，用完请删掉该变量）');
+  }
   console.log(`[server] 限流：${rateLimiter.describeRateLimit()}`);
   console.log(`[server] 登录限流：${loginLimiter.describeLoginLimit()}`);
   if (store.getBackendName() === 'local') {
