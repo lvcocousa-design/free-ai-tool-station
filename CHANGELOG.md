@@ -7,6 +7,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- NVIDIA NIM 供应商（对话）：build.nvidia.com 免费推理 API（OpenAI 兼容接口），默认模型 GLM-5.3-Flash，另有 Kimi K3.1 Pro、Nemotron 3.5 Lightning 30B、MiniMax M3.1 Flash、Nemotron 3 Nano Omni 30B Reasoning、Mistral Large 4、Step-5 Preview、Gemma 4 31B、Muse Glimmer 30B 共 9 个模型；免费试用免绑卡，约 40 请求/分钟，仅限试用评估、不可用于生产。
+
 ## [0.1.0] - 2026-11-19
 
 ### Added

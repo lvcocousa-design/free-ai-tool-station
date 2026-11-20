@@ -15,7 +15,7 @@ Tech stack: Node.js + Express (the backend only depends on `express`), a vanilla
 | --- | --- | --- |
 | Create | Image generation: prompt + square/portrait/landscape size + adjustable steps (1–50) and CFG (1–20), three backends to choose from | InstaBox CPU (Realistic Vision, size/steps/CFG all apply) / Kaggle GPU (FLUX.1 schnell FP8, fixed 1024×1024, 4 steps, cfg 1.0) / Cloudflare (FLUX.1 schnell, fixed 1024×1024, max 8 steps, cfg fixed at 1.0) |
 | Create | Video generation: pick an image from history as the first frame + a motion description, generates a 5-second video | Kaggle GPU (Wan 2.2 TI2V-5B image-to-video, 720p) |
-| Chat / Code | Multi-turn text chat and code Q&A, sessions can be saved/deleted | Zhipu z.ai (GLM-4.7-Flash / GLM-4.5-Flash) / Groq (gpt-oss-120b / gpt-oss-20b / qwen3.8-27b) / Cloudflare (Llama-3.1-8b) / Google Gemini (Gemini 3.8 Flash / Gemini 3.5 Flash-Lite) |
+| Chat / Code | Multi-turn text chat and code Q&A, sessions can be saved/deleted | Zhipu z.ai (GLM-4.7-Flash / GLM-4.5-Flash) / Groq (gpt-oss-120b / gpt-oss-20b / qwen3.8-27b) / Cloudflare (Llama-3.1-8b) / Google Gemini (Gemini 3.8 Flash / Gemini 3.5 Flash-Lite) / NVIDIA NIM (GLM-5.3-Flash / Kimi K3.1 Pro / Mistral Large 4 and 6 more models) |
 | Image | Upload an image and ask questions about it; OCR to extract text from images | Zhipu z.ai (GLM-4.6V-Flash) / Google Gemini (Gemini 3.8 Flash) for Q&A / SiliconFlow (PaddleOCR-VL) for OCR |
 | Translate | Text translation, with automatic source-language detection | DeepL / Cloudflare (m2m100) / SiliconFlow (Hunyuan-MT-7B) |
 | Voice | Text-to-speech (TTS); speech-to-text (STT, record or upload audio) | TTS: ElevenLabs (free premade voices, default Sarah) / Cloudflare (MeloTTS); STT: Groq Whisper / Cloudflare Whisper / SiliconFlow SenseVoice |
@@ -34,6 +34,7 @@ The Music tab only shows a notice and does not offer generation (see [Notes](#no
 | Groq | 200,000 tokens and 1,000 requests per model per day | No card required |
 | Zhipu z.ai | GLM Flash series models are free | International edition, no real-name verification required |
 | Google Gemini | Free input & output tokens on Flash / Flash-Lite models | Rate limits apply; free-tier content is used to improve Google's products |
+| NVIDIA NIM | Free trial | No card required, about 40 requests per minute; trial and evaluation only, not for production |
 | DeepL API Free | 1,000,000 characters | Per the usage period shown on your account page |
 | ElevenLabs | 10,000 credits per month | Free accounts can only use premade voices for TTS; Music API is not available |
 | SiliconFlow | Some models are free | See the model page on the SiliconFlow website for the free models |
@@ -53,6 +54,7 @@ Quotas are subject to each provider's latest official terms.
 | ElevenLabs | https://elevenlabs.io | After registering, create a key under Profile → API Keys |
 | SiliconFlow | https://cloud.siliconflow.cn | After registering, create a key on the API Keys page in the console |
 | Google Gemini | https://aistudio.google.com | Log in to Google AI Studio and create a key on the API Keys page |
+| NVIDIA NIM | https://build.nvidia.com | After registering for an NVIDIA Developer account, create a key on the API Keys page (keys start with `nvapi-`) |
 
 Keys can be set in `.env`, or entered on the in-app **Settings** page (Settings-page keys take precedence).
 
@@ -79,6 +81,7 @@ See [.env.example](.env.example) for the full list (copy it to `.env` and fill i
 | `ELEVENLABS_API_KEY` | ElevenLabs API key |
 | `SILICONFLOW_API_KEY` | SiliconFlow API key |
 | `GEMINI_API_KEY` | Google Gemini API key |
+| `NVIDIA_API_KEY` | NVIDIA NIM API key |
 
 Providers you don't use can be left empty — the corresponding features will show a "not configured" notice and other features keep working.
 

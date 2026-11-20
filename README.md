@@ -15,7 +15,7 @@ English version: [README_EN.md](README_EN.md)
 | --- | --- | --- |
 | 创作 | 出图：提示词 + 方形/竖图/横图选择 + 步数（1–50）与 CFG（1–20）可调，后端三选一 | InstaBox CPU（Realistic Vision 模型，尺寸/步数/CFG 全部生效）/ Kaggle GPU（FLUX.1 schnell FP8，固定 1024×1024、4 步、cfg 1.0）/ Cloudflare（FLUX.1 schnell，固定 1024×1024，步数最多 8 步、cfg 固定 1.0） |
 | 创作 | 生视频：从历史里选一张图做首帧 + 动作描述，生成 5 秒视频 | Kaggle GPU（Wan 2.2 TI2V-5B 图生视频，720p） |
-| 对话/代码 | 多轮文字对话、代码问答，会话可保存/删除 | 智谱 z.ai（GLM-4.7-Flash / GLM-4.5-Flash）/ Groq（gpt-oss-120b / gpt-oss-20b / qwen3.8-27b）/ Cloudflare（Llama-3.1-8b）/ Google Gemini（Gemini 3.8 Flash / Gemini 3.5 Flash-Lite） |
+| 对话/代码 | 多轮文字对话、代码问答，会话可保存/删除 | 智谱 z.ai（GLM-4.7-Flash / GLM-4.5-Flash）/ Groq（gpt-oss-120b / gpt-oss-20b / qwen3.8-27b）/ Cloudflare（Llama-3.1-8b）/ Google Gemini（Gemini 3.8 Flash / Gemini 3.5 Flash-Lite）/ NVIDIA NIM（GLM-5.3-Flash / Kimi K3.1 Pro / Mistral Large 4 等 9 个模型） |
 | 识图 | 上传图片提问；OCR 提取图片文字 | 智谱 z.ai（GLM-4.6V-Flash）/ Google Gemini（Gemini 3.8 Flash）提问 / 硅基流动（PaddleOCR-VL）OCR |
 | 翻译 | 文本翻译，支持自动检测源语言 | DeepL / Cloudflare（m2m100）/ 硅基流动（Hunyuan-MT-7B） |
 | 语音 | 文字转语音（TTS）；语音转文字（STT，录音或上传音频） | TTS：ElevenLabs（免费 premade 音色，默认 Sarah）/ Cloudflare（MeloTTS）；STT：Groq Whisper / Cloudflare Whisper / 硅基流动 SenseVoice |
@@ -34,6 +34,7 @@ English version: [README_EN.md](README_EN.md)
 | Groq | 每模型每天 20 万 tokens、1000 次请求 | 免绑卡 |
 | 智谱 z.ai | GLM Flash 系列模型免费 | 国际版，免实名 |
 | Google Gemini | Flash / Flash-Lite 模型输入输出 tokens 免费 | 有速率限制；免费档内容会被用于改进 Google 产品 |
+| NVIDIA NIM | 免费试用 | 免绑卡，约 40 请求/分钟；仅限试用评估，不可用于生产 |
 | DeepL API Free | 100 万字符 | 以账号页显示的用量周期为准 |
 | ElevenLabs | 每月 10,000 credits | 免费账号 TTS 只能用 premade 音色；音乐 API 不可用 |
 | 硅基流动 | 部分模型免费 | 免费模型见硅基流动官网模型页 |
@@ -53,6 +54,7 @@ English version: [README_EN.md](README_EN.md)
 | ElevenLabs | https://elevenlabs.io | 注册后在 Profile → API Keys 页创建 |
 | 硅基流动 | https://cloud.siliconflow.cn | 注册后在控制台 API 密钥页创建 |
 | Google Gemini | https://aistudio.google.com | 登录 Google AI Studio，在 API Keys 页创建 |
+| NVIDIA NIM | https://build.nvidia.com | 注册 NVIDIA 开发者账号后，在 API Keys 页创建（Key 以 `nvapi-` 开头） |
 
 Key 可以填在 `.env` 里，也可以在站内「设置」页录入（设置页的优先级更高）。
 
@@ -79,6 +81,7 @@ Key 可以填在 `.env` 里，也可以在站内「设置」页录入（设置�
 | `ELEVENLABS_API_KEY` | ElevenLabs API Key |
 | `SILICONFLOW_API_KEY` | 硅基流动 API Key |
 | `GEMINI_API_KEY` | Google Gemini API Key |
+| `NVIDIA_API_KEY` | NVIDIA NIM API Key |
 
 不用的供应商可以留空，对应功能会显示「未配置」提示，不影响其他功能使用。
 
