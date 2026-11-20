@@ -155,3 +155,34 @@ test('instabox 缺 proxyUrl → 400，消息用“代理地址”', async () => 
   assert.match(json.message, /^请先填写/);
   assert.match(json.message, /代理地址/);
 });
+
+async function postSave(provider, body) {
+  const res = await fetch(`${baseUrl}/api/providers/${encodeURIComponent(provider)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json();
+  return { status: res.status, json };
+}
+
+test('已保存凭据后：空输入测试不再 400，改用已保存的凭据测', async () => {
+  // 先保存一个连不上的本地地址（connection refused，探测立即失败，不等超时）。
+  const saved = await postSave('instabox', { proxyUrl: 'http://127.0.0.1:1' });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.json.saved, true);
+  // 空输入测试：不再 400，而是用已保存的地址做探测，返回 200 + ok:false。
+  const { status, json } = await postTest('instabox', {});
+  assert.equal(status, 200);
+  assert.equal(json.ok, false);
+  assert.equal(typeof json.message, 'string');
+});
+
+test('测试时请求体里的值优先于已保存的凭据', async () => {
+  // 传一个格式错误的地址：如果用了已保存的 127.0.0.1:1，会是连接失败；
+  // 用请求体的值则报格式错误——以此区分。
+  const { status, json } = await postTest('instabox', { proxyUrl: 'not-a-url' });
+  assert.equal(status, 200);
+  assert.equal(json.ok, false);
+  assert.match(json.message, /格式不正确/);
+});
