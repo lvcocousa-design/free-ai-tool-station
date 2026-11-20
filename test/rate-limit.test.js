@@ -89,10 +89,11 @@ test('窗口计数：count/record/delete/retryAfterSeconds（登录失败计数�
 
 // ---------- 2a. 分级 ----------
 
-test('分级：9 个重操作 POST + 供应商连通性测试都算 heavy', () => {
+test('分级：10 个重操作 POST + 供应商连通性测试都算 heavy', () => {
   const heavyPaths = [
     '/api/generate', '/api/video', '/api/chat', '/api/analyze',
     '/api/translate', '/api/tts', '/api/stt', '/api/embed', '/api/backup/import',
+    '/api/totp/confirm',
   ];
   for (const p of heavyPaths) {
     assert.equal(classifyRequest('POST', p), 'heavy', p);

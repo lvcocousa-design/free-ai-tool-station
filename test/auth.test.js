@@ -15,6 +15,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const { PROJECT_ROOT, makeTempDir, rmDir, withEnv } = require('./helpers');
 const auth = require(path.join(PROJECT_ROOT, 'lib', 'auth'));
+const totpLib = require(path.join(PROJECT_ROOT, 'lib', 'totp'));
 
 const FAKE_PASSWORD = 'test-password-123';
 const WRONG_PASSWORD = 'wrong-password-456';
@@ -201,7 +202,7 @@ describe('未设 ACCESS_PASSWORD（公开访问）', () => {
   test('GET /api/auth/status 返回 authRequired=false, authenticated=true', async () => {
     const res = await fetch(`${server.baseUrl}/api/auth/status`);
     assert.equal(res.status, 200);
-    assert.deepEqual(await res.json(), { authRequired: false, authenticated: true });
+    assert.deepEqual(await res.json(), { authRequired: false, authenticated: true, totpEnabled: false });
   });
 
   test('GET /api/health 200', async () => {
@@ -252,7 +253,7 @@ describe('设置 ACCESS_PASSWORD 后', () => {
   test('未登录：GET /api/auth/status 返回 authRequired=true, authenticated=false', async () => {
     const res = await fetch(`${server.baseUrl}/api/auth/status`);
     assert.equal(res.status, 200);
-    assert.deepEqual(await res.json(), { authRequired: true, authenticated: false });
+    assert.deepEqual(await res.json(), { authRequired: true, authenticated: false, totpEnabled: false });
   });
 
   test('未登录：GET /api/providers 返回 401', async () => {
@@ -295,7 +296,7 @@ describe('设置 ACCESS_PASSWORD 后', () => {
     const statusRes = await fetch(`${server.baseUrl}/api/auth/status`, {
       headers: { Cookie: cookie },
     });
-    assert.deepEqual(await statusRes.json(), { authRequired: true, authenticated: true });
+    assert.deepEqual(await statusRes.json(), { authRequired: true, authenticated: true, totpEnabled: false });
   });
 
   test('伪造 token 的 cookie：GET /api/providers 仍 401', async () => {
@@ -365,5 +366,118 @@ describe('登录成功清掉失败计数', () => {
     }
     const { res } = await login(WRONG_PASSWORD);
     assert.equal(res.status, 429);
+  });
+});
+
+describe('TOTP 二次验证（完整流程）', () => {
+  let server;
+  let secret = '';
+  let backupCodes = [];
+  before(async () => {
+    server = await startServer({ ACCESS_PASSWORD: FAKE_PASSWORD });
+  });
+  after(async () => { await server.stop(); });
+
+  async function login(password, totpCode) {
+    const body = { password };
+    if (totpCode !== undefined) body.totpCode = totpCode;
+    const res = await fetch(`${server.baseUrl}/api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return { res, json: await res.json() };
+  }
+
+  async function loginCookie(totpCode) {
+    const { res, json } = await login(FAKE_PASSWORD, totpCode);
+    assert.equal(res.status, 200, `登录应成功，实际：${JSON.stringify(json)}`);
+    const cookies = getSetCookies(res);
+    const authCookie = cookies.find((c) => c.startsWith('auth_token='));
+    assert.ok(authCookie, '登录成功应下发 auth_token cookie');
+    return authCookie.split(';')[0];
+  }
+
+  async function totpApi(pathName, body, cookie) {
+    const res = await fetch(`${server.baseUrl}${pathName}`, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(cookie ? { Cookie: cookie } : {}),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    return { res, json: await res.json() };
+  }
+
+  test('未开启时状态 totpEnabled=false，登录无需动态码', async () => {
+    const cookie = await loginCookie();
+    const { res, json } = await totpApi('/api/totp/status', undefined, cookie);
+    assert.equal(res.status, 200);
+    assert.equal(json.totpEnabled, false);
+    assert.equal(json.authEnabled, true);
+    assert.equal(json.backupCodesRemaining, 0);
+  });
+
+  test('setup 返回密钥与 otpauth 链接；错误动态码确认失败', async () => {
+    const cookie = await loginCookie();
+    const { res, json } = await totpApi('/api/totp/setup', {}, cookie);
+    assert.equal(res.status, 200);
+    assert.equal(json.ok, true);
+    assert.match(json.secret, /^[A-Z2-7]{32}$/);
+    assert.ok(json.otpauthUrl.startsWith('otpauth://totp/'));
+    secret = json.secret;
+    const wrong = await totpApi('/api/totp/confirm', { secret, code: '000000' }, cookie);
+    assert.equal(wrong.res.status, 401);
+    assert.equal(wrong.json.message, '动态码不正确，请核对验证器里的 6 位码');
+  });
+
+  test('正确动态码确认成功，返回 8 个备用码；状态变为已开启', async () => {
+    const cookie = await loginCookie();
+    const code = totpLib.generateCode(secret);
+    const { res, json } = await totpApi('/api/totp/confirm', { secret, code }, cookie);
+    assert.equal(res.status, 200);
+    assert.equal(json.ok, true);
+    assert.equal(json.backupCodes.length, 8);
+    backupCodes = json.backupCodes;
+    const status = await totpApi('/api/totp/status', undefined, cookie);
+    assert.equal(status.json.totpEnabled, true);
+    assert.equal(status.json.backupCodesRemaining, 8);
+  });
+
+  test('开启后：不带动态码 401，错误动态码 401，正确动态码 200', async () => {
+    const noCode = await login(FAKE_PASSWORD);
+    assert.equal(noCode.res.status, 401);
+    assert.equal(noCode.json.message, '请输入动态码');
+    const wrongCode = await login(FAKE_PASSWORD, '000000');
+    assert.equal(wrongCode.res.status, 401);
+    assert.equal(wrongCode.json.message, '动态码不正确');
+    const ok = await login(FAKE_PASSWORD, totpLib.generateCode(secret));
+    assert.equal(ok.res.status, 200);
+    assert.equal(ok.json.ok, true);
+  });
+
+  test('备用码可登录一次，用过即失效，剩余 7 个', async () => {
+    const first = await login(FAKE_PASSWORD, backupCodes[0]);
+    assert.equal(first.res.status, 200);
+    const cookie = await loginCookie(totpLib.generateCode(secret));
+    const status = await totpApi('/api/totp/status', undefined, cookie);
+    assert.equal(status.json.backupCodesRemaining, 7);
+    const reuse = await login(FAKE_PASSWORD, backupCodes[0]);
+    assert.equal(reuse.res.status, 401);
+    assert.equal(reuse.json.message, '动态码不正确');
+  });
+
+  test('关闭：错误密码 401，正确密码 200；关闭后登录无需动态码', async () => {
+    const cookie = await loginCookie(totpLib.generateCode(secret));
+    const wrong = await totpApi('/api/totp/disable', { password: WRONG_PASSWORD }, cookie);
+    assert.equal(wrong.res.status, 401);
+    const ok = await totpApi('/api/totp/disable', { password: FAKE_PASSWORD }, cookie);
+    assert.equal(ok.res.status, 200);
+    assert.equal(ok.json.ok, true);
+    const status = await totpApi('/api/totp/status', undefined, cookie);
+    assert.equal(status.json.totpEnabled, false);
+    const plain = await login(FAKE_PASSWORD);
+    assert.equal(plain.res.status, 200);
   });
 });
